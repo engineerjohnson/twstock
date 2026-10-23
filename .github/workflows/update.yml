@@ -1,0 +1,68 @@
+name: 更新台股分析資料並發布網站
+
+on:
+  schedule:
+    # GitHub 用 UTC。台北 = UTC+8。
+    - cron: "30 7 * * 1-5"            # 台北 15:30 週一~五：收盤後完整更新 (行情/法人/融資券/集保 + 回測 + AI)
+    - cron: "0 22,0,2,4,6,8,10,12,14 * * *"  # 台北 06,08,10,12,14,16,18,20,22 點：新聞 + 國際行情
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "news / full / auto"
+        default: "auto"
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      TZ: Asia/Taipei
+      PYTHONIOENCODING: utf-8
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 安裝套件
+        run: pip install -r requirements.txt
+
+      - name: 還原資料庫快取 (避免每次重抓 3 個月)
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: data/twstock.db
+          key: twstock-db-${{ github.run_id }}
+          restore-keys: |
+            twstock-db-
+
+      - name: 同步資料並產生靜態網站
+        run: python -m app.cloud_sync ${{ github.event.inputs.mode || 'auto' }}
+
+      - name: 儲存資料庫快取
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: data/twstock.db
+          key: twstock-db-${{ github.run_id }}
+
+      - name: 發布到 GitHub Pages (gh-pages 分支，不保留歷史以節省空間)
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs
+          publish_branch: gh-pages
+          force_orphan: true
+          commit_message: "update ${{ github.run_id }}"

@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+requests
+pandas
+numpy
+yfinance
+feedparser
+lxml
+segno
+python-multipart
