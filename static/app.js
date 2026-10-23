@@ -249,7 +249,7 @@ function bindExpand(sel) { document.querySelectorAll(sel + ' tr.row').forEach(tr
 /* ---------- recommend ---------- */
 async function loadRecommend() {
   const d = await api('/api/recommend?limit=50&min_lots=' + minLots());
-  $('#recBuilt').textContent = ` 資料日 ${d.date}，計算於 ${d.built}，共 ${d.items.length} 檔 (點表頭排序：▼大→小 / ▲小→大 / 再點取消)`;
+  $('#recBuilt').textContent = ` 資料日 ${d.date}，計算於 ${d.built}，共 ${d.items.length} 檔 (點表頭排序：▼大→小 / ▲小→大 / 再點取消；Shift+點或開「多欄排序」可加次要欄位)`;
   $('#expRec').href = '/api/export?what=recommend&min_lots=' + minLots();
   $('#recTable').innerHTML = HEAD + d.items.map(r => stockRow(r) + `<tr class="expand"><td colspan="${NCOL}"><b>推薦理由：</b>${r.reasons.map(x => `<span class="badge">${esc(x)}</span>`).join(' ')}
      ${r.risks.length ? `<br><b>風險：</b>${r.risks.map(x => `<span class="badge risk">${esc(x)}</span>`).join(' ')}` : ''}
@@ -262,7 +262,7 @@ async function loadRecommend() {
 async function loadTechnical() {
   const d = await api('/api/technical?signal=' + $('#techSignal').value + '&limit=100&min_lots=' + minLots());
   $('#techTable').innerHTML = HEAD + d.items.map(r => stockRow(r)).join('');
-  $('#techCount').textContent = `共 ${d.items.length} 檔 (點表頭排序：▼大→小 / ▲小→大 / 再點取消)`;
+  $('#techCount').textContent = `共 ${d.items.length} 檔 (點表頭排序：▼大→小 / ▲小→大 / 再點取消；Shift+點或開「多欄排序」可加次要欄位)`;
   $('#expTech').href = '/api/export?what=technical&signal=' + $('#techSignal').value + '&min_lots=' + minLots();
   refreshLive(d.items.map(r => r.code));
 }
@@ -286,7 +286,7 @@ $('#btnBacktest').onclick = async () => {
 /* ---------- chips ---------- */
 async function loadChips() {
   const d = await api('/api/chips?kind=' + $('#chipKind').value + '&limit=80&min_lots=' + minLots());
-  $('#chipMeta').textContent = `資料日 ${d.date} · 集保週資料 ${d.tdcc_date || '-'} · 共 ${d.items.length} 檔 (點表頭排序：▼大→小 / ▲小→大 / 再點取消)`;
+  $('#chipMeta').textContent = `資料日 ${d.date} · 集保週資料 ${d.tdcc_date || '-'} · 共 ${d.items.length} 檔 (點表頭排序：▼大→小 / ▲小→大 / 再點取消；Shift+點或開「多欄排序」可加次要欄位)`;
   $('#expChips').href = '/api/export?what=chips&kind=' + $('#chipKind').value + '&min_lots=' + minLots();
   $('#chipTable').innerHTML = HEAD + d.items.map(r => stockRow(r)).join('') || '<tr><td>無符合</td></tr>';
   refreshLive(d.items.map(r => r.code));
@@ -497,27 +497,54 @@ function parseCell(td) {
   if (m[2] === '億') v *= 1e8; else if (m[2] === '萬') v *= 1e4;
   return v;
 }
-document.body.addEventListener('click', e => {
-  const th = e.target.closest('.tbl th'); if (!th) return;
-  const table = th.closest('table'); const ths = [...th.parentElement.children]; const idx = ths.indexOf(th);
-  const dir = th.dataset.dir === 'desc' ? 'asc' : th.dataset.dir === 'asc' ? 'none' : 'desc';  // 三段式: 降冪 → 升冪 → 取消
+let multiSort = false;
+try { multiSort = localStorage.getItem('multiSort') === '1'; } catch (e) { }
+function applySort(table) {
+  const keys = table._sortKeys || [];
+  const ths = [...table.querySelector('tr').children];
   ths.forEach(h => { h.dataset.dir = ''; h.classList.remove('sorted'); const a = h.querySelector('.arrow'); if (a) a.remove(); });
+  keys.forEach((k, n) => { const h = ths[k.idx]; if (!h) return; h.dataset.dir = k.dir; h.classList.add('sorted'); h.insertAdjacentHTML('beforeend', `<span class="arrow">${k.dir === 'desc' ? ' ▼' : ' ▲'}${keys.length > 1 ? n + 1 : ''}</span>`); });
   const trs = [...table.querySelectorAll('tr')].slice(1);
   const groups = [];
   trs.forEach(tr => { if (tr.classList.contains('expand') && groups.length) groups[groups.length - 1].push(tr); else groups.push([tr]); });
-  if (!table._orig || !table.contains(table._orig[0][0])) table._orig = groups.slice();  // 記住原始順序 (表格重繪後自動更新)
-  if (dir === 'none') { table._orig.forEach(g => g.forEach(tr => table.appendChild(tr))); toast('已取消排序'); return; }
-  th.dataset.dir = dir; th.classList.add('sorted');
-  th.insertAdjacentHTML('beforeend', `<span class="arrow">${dir === 'desc' ? ' ▼' : ' ▲'}</span>`);
-  const val = g => { const td = g[0].children[idx]; return td ? parseCell(td) : null; };
-  groups.sort((a, b) => {
-    const x = val(a), y = val(b);
+  if (!table._orig || !table.contains(table._orig[0][0])) table._orig = groups.slice();
+  if (!keys.length) { table._orig.forEach(g => g.forEach(tr => table.appendChild(tr))); return; }
+  const val = (g, idx) => { const td = g[0].children[idx]; return td ? parseCell(td) : null; };
+  const cmp = (x, y, dir) => {
     if (x === null && y === null) return 0; if (x === null) return 1; if (y === null) return -1;
     if (typeof x === 'number' && typeof y === 'number') return dir === 'desc' ? y - x : x - y;
     return dir === 'desc' ? String(y).localeCompare(String(x), 'zh-Hant') : String(x).localeCompare(String(y), 'zh-Hant');
-  });
+  };
+  groups.sort((a, b) => { for (const k of keys) { const c = cmp(val(a, k.idx), val(b, k.idx), k.dir); if (c) return c; } return 0; });
   groups.forEach(g => g.forEach(tr => table.appendChild(tr)));
+}
+document.body.addEventListener('click', e => {
+  const th = e.target.closest('.tbl th'); if (!th) return;
+  const table = th.closest('table'); const idx = [...th.parentElement.children].indexOf(th);
+  let keys = table._sortKeys || [];
+  const pos = keys.findIndex(k => k.idx === idx);
+  const additive = (e.shiftKey || multiSort) && keys.length && pos !== 0;
+  if (additive) {
+    if (pos < 0) keys.push({ idx, dir: 'desc' });
+    else if (keys[pos].dir === 'desc') keys[pos].dir = 'asc';
+    else keys.splice(pos, 1);
+  } else {
+    const cur = pos === 0 ? keys[0].dir : '';
+    keys = cur === '' ? [{ idx, dir: 'desc' }] : cur === 'desc' ? [{ idx, dir: 'asc' }] : [];
+    if (!keys.length) toast('已取消排序');
+  }
+  table._sortKeys = keys;
+  applySort(table);
+  if (keys.length > 1) toast(`排序：${keys.map((k, n) => `${n + 1}.${table.querySelector('tr').children[k.idx].textContent.replace(/[▼▲]\d*/g, '').trim()}${k.dir === 'desc' ? '↓' : '↑'}`).join('　')}`);
 });
+/* 多欄排序開關 (手機沒有 Shift 鍵) */
+(function () {
+  const box = document.createElement('label'); box.id = 'multiSortBox'; box.title = '開啟後，點第二個欄位會加為次要排序 (電腦也可直接 Shift+點)';
+  box.innerHTML = `<input type="checkbox" id="multiSortChk"> 多欄排序`;
+  const act = document.querySelector('.actions'); act.insertBefore(box, act.firstChild);
+  const chk = $('#multiSortChk'); chk.checked = multiSort;
+  chk.onchange = () => { multiSort = chk.checked; try { localStorage.setItem('multiSort', multiSort ? '1' : '0'); } catch (e) { } toast(multiSort ? '多欄排序：先點主要欄位，再點次要欄位' : '已關閉多欄排序'); };
+})();
 
 /* ---------- 啟動 ---------- */
 const loaders = { overview: loadOverview, news: loadNews, recommend: loadRecommend, technical: loadTechnical, chips: loadChips, rankings: loadRankings, watchlist: loadWatchlist, stock: () => { } };
