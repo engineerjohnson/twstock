@@ -123,3 +123,20 @@ button.sec{background:var(--card2)}
 
 body.static .only-server{display:none!important}
 #cloudNote{font-size:12px;padding:4px 8px;border:1px dashed var(--line);border-radius:6px}
+
+/* ===== 語音播報 ===== */
+.ttsbar{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.ttsbar label{color:var(--muted)}
+.newsfull .item.speaking{border-color:var(--acc);box-shadow:0 0 0 2px rgba(78,161,255,.25)}
+.newslist li.speaking{background:rgba(78,161,255,.12);border-radius:6px}
+.spk{cursor:pointer;color:var(--muted);margin-right:6px;font-size:13px}
+.spk:hover{color:var(--acc)}
+.card h2 .sp{flex:1}
+button.small{padding:3px 8px;font-size:12px;font-weight:400}
+@media(max-width:900px){.ttsbar{position:sticky;top:0;z-index:15}}
+#ttsNow{position:fixed;left:12px;right:12px;bottom:12px;z-index:60;background:var(--card);border:1px solid var(--acc);border-radius:10px;padding:8px 12px;display:flex;align-items:center;gap:10px;box-shadow:0 4px 18px rgba(0,0,0,.4)}
+#ttsNow #ttsNowTitle{flex:1;cursor:pointer;font-size:14px;line-height:1.4}
+#ttsNow #ttsNowTitle:hover{color:var(--acc)}
+#ttsNow .ctl{display:flex;gap:4px}
+#ttsNow .ctl button{padding:4px 8px}
+#toast{bottom:70px}

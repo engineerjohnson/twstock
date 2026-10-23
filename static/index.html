@@ -48,7 +48,7 @@
   <section id="tab-overview" class="tab active">
     <div class="grid2">
       <div class="card">
-        <h2>🌍 國際市場 → 台股影響 <span class="muted" id="intlUpdated"></span></h2>
+        <h2>🌍 國際市場 → 台股影響 <span class="muted" id="intlUpdated"></span><span class="sp"></span><button id="ttsOverview" class="sec small" title="語音播報：國際影響、AI 觀點、利多與利空">🔊 播報重點</button></h2>
         <div id="impactView" class="impact"></div>
         <div id="intlCards" class="tiles"></div>
         <ul id="impactNotes" class="notes"></ul>
@@ -81,6 +81,17 @@
       <input id="newsQ" placeholder="關鍵字 / 代號">
       <button id="newsGo">搜尋</button>
       <span class="muted" id="newsUpdated"></span>
+    </div>
+    <div class="toolbar ttsbar" id="ttsBar">
+      <button id="ttsPlay" class="primary">🔊 播報全部</button>
+      <button id="ttsPause" class="sec" disabled>⏸ 暫停</button>
+      <button id="ttsPrev" class="sec" disabled>⏮ 上一則</button>
+      <button id="ttsNext" class="sec" disabled>⏭ 下一則</button>
+      <button id="ttsStop" class="sec" disabled>⏹ 停止</button>
+      <select id="ttsMode" title="播報內容"><option value="title">只唸標題</option><option value="summary" selected>標題＋摘要</option></select>
+      <select id="ttsSent" title="播報範圍"><option value="">全部新聞</option><option value="bull">只唸利多</option><option value="bear">只唸利空</option><option value="both">利多＋利空</option></select>
+      <label class="small">語速 <input type="range" id="ttsRate" min="0.6" max="1.8" step="0.1" value="1.1" style="width:90px;vertical-align:middle"> <span id="ttsRateV">1.1x</span></label>
+      <span class="muted" id="ttsStatus"></span>
     </div>
     <div id="newsList" class="newsfull"></div>
   </section>

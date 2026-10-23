@@ -218,8 +218,9 @@ async function loadNews() {
   const q = new URLSearchParams({ cat: $('#newsCat').value, sent: $('#newsSent').value, q: $('#newsQ').value, tag: $('#newsTag').value, limit: 200 });
   const d = await api('/api/news?' + q);
   $('#newsUpdated').textContent = d.updated ? `共 ${d.items.length} 則 · 更新 ${d.updated}` : '';
-  $('#newsList').innerHTML = d.items.map(r => `<div class="item">
-    <div class="t">${sentBadge(r.sentiment)} <a href="${esc(r.link)}" target="_blank">${esc(r.title)}</a></div>
+  newsItems = d.items;
+  $('#newsList').innerHTML = d.items.map((r, i) => `<div class="item" data-idx="${i}">
+    <div class="t"><span class="spk" data-idx="${i}" title="播報這一則">🔊</span>${sentBadge(r.sentiment)} <a href="${esc(r.link)}" target="_blank">${esc(r.title)}</a></div>
     ${r.summary ? `<div class="s">${esc(r.summary.slice(0, 220))}${r.summary.length > 220 ? '…' : ''}</div>` : ''}
     <div class="m">${r.time} · ${esc(r.source)} · ${esc(r.category)} ${r.stock_names.map(s => codeLink(s.code, s.name)).join(' ')}
       ${(r.tags.topics || []).map(t => `<span class="badge t">${esc(t)}</span>`).join('')}${(r.tags.highlights || []).map(h => `<span class="badge f">${esc(h)}</span>`).join('')}
@@ -554,3 +555,101 @@ $('#btnMobile').onclick = async () => {
     </ol>`);
 };
 document.addEventListener('keydown', e => { if (e.key === 'Escape') $('#modal').classList.add('hidden'); });
+
+
+/* ---------- 語音播報 (Web Speech API：iPhone / Android / 電腦瀏覽器皆內建，不需伺服器) ---------- */
+let newsItems = [];
+const TTS = { queue: [], idx: -1, playing: false, paused: false, utter: null, kind: '' };
+const ttsOK = 'speechSynthesis' in window;
+function ttsVoice() {
+  const vs = speechSynthesis.getVoices();
+  return vs.find(v => /zh[-_]TW/i.test(v.lang) && /Mei-Jia|Hanhan|Yating|HsiaoChen|Google/i.test(v.name)) || vs.find(v => /zh[-_]TW/i.test(v.lang)) || vs.find(v => /^zh/i.test(v.lang)) || null;
+}
+if (ttsOK) { speechSynthesis.onvoiceschanged = () => { }; speechSynthesis.getVoices(); }
+function ttsClean(t) { return String(t || '').replace(/〈|〉|《|》|【|】|「|」|『|』/g, '，').replace(/\s+/g, ' ').replace(/[|｜]/g, '，').replace(/(\d{4})-TW/g, '$1'); }
+function ttsSplit(text) { return ttsClean(text).split(/(?<=[。！？!?；;])/).map(s => s.trim()).filter(s => s.length > 1); }
+function ttsSetUI() {
+  const on = TTS.playing;
+  ['#ttsPause', '#ttsPrev', '#ttsNext', '#ttsStop'].forEach(s => { const b = $(s); if (b) b.disabled = !on; });
+  const p = $('#ttsPause'); if (p) p.textContent = TTS.paused ? '▶ 繼續' : '⏸ 暫停';
+  const pl = $('#ttsPlay'); if (pl) pl.textContent = on ? '🔊 播報中…' : '🔊 播報全部';
+  const st = $('#ttsStatus'); if (st) st.textContent = on ? `第 ${TTS.idx + 1} / ${TTS.queue.length} 則` : '';
+  document.querySelectorAll('.speaking').forEach(e => e.classList.remove('speaking'));
+  if (on && TTS.kind === 'news') { const el = document.querySelector(`#newsList .item[data-idx="${TTS.queue[TTS.idx].i}"]`); if (el) { el.classList.add('speaking'); el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } }
+  const bar = $('#ttsNow');
+  if (bar) {
+    if (!on) bar.classList.add('hidden');
+    else {
+      const it = TTS.queue[TTS.idx]; bar.classList.remove('hidden');
+      $('#ttsNowTitle').innerHTML = `<span class="muted">🔊 ${TTS.idx + 1}/${TTS.queue.length}</span> ${esc(it.title || '')}${it.link ? ' <span class="badge t">點標題看全文</span>' : it.code ? ' <span class="badge t">點標題看K線</span>' : ''}`;
+      $('#ttsNowPause').textContent = TTS.paused ? '▶' : '⏸';
+    }
+  }
+}
+(function () {
+  const bar = document.createElement('div'); bar.id = 'ttsNow'; bar.className = 'hidden';
+  bar.innerHTML = `<div id="ttsNowTitle"></div><div class="ctl"><button id="ttsNowPause" title="暫停/繼續">⏸</button><button id="ttsNowNext" title="下一則">⏭</button><button id="ttsNowStop" title="停止">⏹</button></div>`;
+  document.body.appendChild(bar);
+  $('#ttsNowTitle').onclick = () => { const it = TTS.queue[TTS.idx]; if (!it) return; if (it.link) window.open(it.link, '_blank'); else if (it.code) openStock(it.code); };
+  $('#ttsNowPause').onclick = () => { if (!TTS.playing) return; if (TTS.paused) { speechSynthesis.resume(); TTS.paused = false; } else { speechSynthesis.pause(); TTS.paused = true; } ttsSetUI(); };
+  $('#ttsNowNext').onclick = () => ttsJump(1);
+  $('#ttsNowStop').onclick = () => ttsStop();
+})();
+function ttsSpeakItem() {
+  if (!TTS.playing || TTS.idx < 0 || TTS.idx >= TTS.queue.length) { ttsStop(); if (TTS.idx >= TTS.queue.length && TTS.queue.length) toast('播報完畢'); return; }
+  const item = TTS.queue[TTS.idx]; ttsSetUI();
+  const parts = ttsSplit(item.text); let k = 0;
+  const rate = parseFloat($('#ttsRate') ? $('#ttsRate').value : 1.1) || 1.1; const voice = ttsVoice();
+  const next = () => {
+    if (!TTS.playing) return;
+    if (k >= parts.length) { TTS.idx++; setTimeout(ttsSpeakItem, 350); return; }
+    const u = new SpeechSynthesisUtterance(parts[k++]); u.lang = 'zh-TW'; u.rate = rate; if (voice) u.voice = voice;
+    u.onend = next;
+    u.onerror = e => {
+      if (e.error === 'interrupted' || e.error === 'canceled') return;
+      if (e.error === 'not-allowed') { ttsStop(); toast('瀏覽器需要你親自點一下播報按鈕才能發聲 (iPhone 請關閉靜音鍵)'); return; }
+      TTS.errors = (TTS.errors || 0) + 1; console.warn('tts', e.error);
+      if (TTS.errors > 5) { ttsStop(); toast('語音播報發生錯誤: ' + e.error); return; }
+      next();
+    };
+    TTS.utter = u; speechSynthesis.speak(u);
+  };
+  next();
+}
+function ttsStart(queue, kind) {
+  if (!ttsOK) return toast('此瀏覽器不支援語音播報');
+  if (!queue.length) return toast('沒有可播報的內容');
+  speechSynthesis.cancel();
+  TTS.queue = queue; TTS.idx = 0; TTS.playing = true; TTS.paused = false; TTS.kind = kind; TTS.errors = 0;
+  ttsSpeakItem();
+}
+function ttsStop() { TTS.playing = false; TTS.paused = false; TTS.queue = []; TTS.idx = -1; if (ttsOK) speechSynthesis.cancel(); ttsSetUI(); }
+function ttsJump(d) { if (!TTS.playing) return; speechSynthesis.cancel(); TTS.idx = Math.max(0, TTS.idx + d); TTS.paused = false; setTimeout(ttsSpeakItem, 200); }
+function newsQueue(filterSent) {
+  const mode = $('#ttsMode').value;
+  return newsItems.map((r, i) => ({ r, i })).filter(({ r }) => !filterSent || (filterSent === 'bull' && r.sentiment > 0) || (filterSent === 'bear' && r.sentiment < 0) || (filterSent === 'both' && r.sentiment !== 0))
+    .map(({ r, i }) => ({ i, title: r.title, link: r.link, text: `${r.sentiment > 0 ? '利多。' : r.sentiment < 0 ? '利空。' : ''}${r.title}。${mode === 'summary' && r.summary ? r.summary.slice(0, 160) + '。' : ''}` }));
+}
+if ($('#ttsPlay')) {
+  $('#ttsPlay').onclick = () => { if (TTS.playing) return; ttsStart(newsQueue($('#ttsSent').value), 'news'); };
+  $('#ttsPause').onclick = () => { if (!TTS.playing) return; if (TTS.paused) { speechSynthesis.resume(); TTS.paused = false; } else { speechSynthesis.pause(); TTS.paused = true; } ttsSetUI(); };
+  $('#ttsPrev').onclick = () => ttsJump(-1); $('#ttsNext').onclick = () => ttsJump(1); $('#ttsStop').onclick = ttsStop;
+  $('#ttsRate').oninput = () => { $('#ttsRateV').textContent = $('#ttsRate').value + 'x'; try { localStorage.setItem('ttsRate', $('#ttsRate').value); } catch (e) { } };
+  $('#ttsMode').onchange = () => { try { localStorage.setItem('ttsMode', $('#ttsMode').value); } catch (e) { } };
+  try { const r = localStorage.getItem('ttsRate'); if (r) { $('#ttsRate').value = r; $('#ttsRateV').textContent = r + 'x'; } const m = localStorage.getItem('ttsMode'); if (m) $('#ttsMode').value = m; } catch (e) { }
+  $('#newsList').addEventListener('click', e => { const s = e.target.closest('.spk'); if (!s) return; const q = newsQueue(''); const pos = q.findIndex(x => x.i === +s.dataset.idx); if (pos < 0) return; ttsStart(q.slice(pos), 'news'); });
+}
+if ($('#ttsOverview')) {
+  $('#ttsOverview').onclick = async () => {
+    if (TTS.playing) { ttsStop(); return; }
+    const d = await api('/api/overview?min_lots=' + minLots());
+    const q = [];
+    q.push({ i: -1, title: '國際市場對台股影響', text: `國際市場對台股影響。${d.impact.view}。${d.impact.notes.join('。')}` });
+    if (d.ai) q.push({ i: -1, title: 'AI 分析師觀點', text: `AI分析師觀點，立場${d.ai.stance}。${d.ai.market_view}。重點事件。${(d.ai.key_events || []).join('。')}。看漲個股。${(d.ai.bullish_stocks || []).map(s => `${s.name}，${s.reason}`).join('。')}` });
+    d.bull_news.forEach((n, k) => q.push({ i: -1, title: n.title, link: n.link, text: (k === 0 ? '利多消息。' : '') + n.title }));
+    d.bear_news.forEach((n, k) => q.push({ i: -1, title: n.title, link: n.link, text: (k === 0 ? '利空消息。' : '') + n.title }));
+    d.recommend.slice(0, 5).forEach((r, k) => q.push({ i: -1, title: `${r.code} ${r.name}`, code: r.code, text: (k === 0 ? '今日綜合推薦。' : '') + `${r.name}，總分${Math.round(r.total)}，${r.reasons.slice(0, 2).join('，')}` }));
+    ttsStart(q, 'overview'); toast('開始播報，再按一次「播報重點」可停止');
+  };
+}
+window.addEventListener('beforeunload', () => { if (ttsOK) speechSynthesis.cancel(); });
