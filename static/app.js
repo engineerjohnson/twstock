@@ -523,6 +523,7 @@ const loaders = { overview: loadOverview, news: loadNews, recommend: loadRecomme
 try { applyTheme(localStorage.getItem('theme') || 'dark'); } catch (e) { applyTheme('dark'); }
 if (STATIC) {
   document.body.classList.add('static');
+  const av = document.querySelector('#aiView p'); if (av) av.textContent = '雲端版：在 GitHub 的 Settings → Secrets 加入 ANTHROPIC_API_KEY 後，每個交易日 15:30 與早上 08:00 會自動產生 AI 分析師報告。';
   const wh = document.querySelector('#tab-watchlist .hint'); if (wh) wh.textContent = '雲端版：自選股存在這支手機/瀏覽器裡（換裝置不會同步）。顯示每日收盤資料；點列展開可編輯備註。';
   sjson('status.json').then(s => { const n = $('#cloudNote'); n.classList.remove('hidden'); n.textContent = `☁️ 雲端版 · 自動更新 ${s.built || ''}（新聞每 2 小時、行情每交易日 15:30 後）`; }).catch(() => { });
 }
