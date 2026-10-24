@@ -205,7 +205,14 @@ async function pollStatus() {
     tradingKnown = true; liveTrading = !!s.trading; $('#liveBar').classList.toggle('hidden', !liveTrading);
     $('#dataDate').textContent = s.data_date ? `資料日 ${s.data_date} · ${s.n_stocks} 檔 · 新聞 ${s.news_updated || '-'}` : '資料初始化中…';
     if (s.ai.running) { $('#btnAI').disabled = true; $('#btnAI').textContent = '🤖 AI 分析中…'; }
-    else { $('#btnAI').disabled = false; $('#btnAI').textContent = '🤖 AI 分析師解讀'; if (aiWaiting) { aiWaiting = false; loadAI(); if (s.ai.error) toast('AI 分析失敗: ' + esc(s.ai.error)); } }
+    else {
+      $('#btnAI').disabled = false; $('#btnAI').textContent = '🤖 AI 分析師解讀';
+      if (aiWaiting) {
+        aiWaiting = false; await loadAI();
+        if (s.ai.error) toast('AI 分析失敗: ' + esc(s.ai.error), 8000);
+        else { showTab('overview'); toast('✅ AI 分析完成，報告在「總覽 → AI 分析師觀點」', 6000); setTimeout(() => { const el = $('#aiView'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 300); }
+      }
+    }
   } catch (e) { }
   clearTimeout(pollStatus.t); pollStatus.t = setTimeout(pollStatus, STATIC ? 60000 : 2500);
 }
@@ -216,7 +223,8 @@ $('#btnPrices').onclick = async () => { const r = await api('/api/refresh?what=a
 $('#btnAI').onclick = async () => {
   const r = await api('/api/ai', { method: 'POST' });
   if (r.result === 'unavailable') return toast('找不到 claude CLI 或 ANTHROPIC_API_KEY，無法執行 AI 分析');
-  if (r.result === 'started') { aiWaiting = true; toast('AI 分析師開始解讀，約 1–2 分鐘'); }
+  if (r.result === 'started') { aiWaiting = true; toast('AI 分析師開始解讀，約 1–2 分鐘。完成後會自動跳到「總覽 → AI 分析師觀點」顯示報告', 7000); }
+  else if (r.result === 'running') { aiWaiting = true; toast('AI 分析仍在進行中，完成後會自動顯示'); }
 };
 
 /* ---------- 即時報價 (盤中) ---------- */
