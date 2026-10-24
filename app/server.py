@@ -4,7 +4,7 @@ from fastapi import FastAPI, Query
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from . import db, sync
-from .config import STATIC_DIR
+from .config import STATIC_DIR, REC_MIN_DAY_LOTS
 from .analysis import engine, market, ai, newsrules, backtest
 from .analysis import technical as techmod
 from .fetch import realtime
@@ -132,17 +132,17 @@ def news(cat: str = "", sent: str = "", q: str = "", tag: str = "", limit: int =
 
 @app.get("/api/recommend")
 def recommend(limit: int = 40, min_lots: int = 1000):
-    return {"items": engine.recommend(limit, min_lots), "date": engine.get().get("date"), "built": engine.get().get("built")}
+    return {"items": engine.recommend(limit, min_lots), "date": engine.get().get("date"), "built": engine.get().get("built"), "min_day_lots": REC_MIN_DAY_LOTS}
 
 @app.get("/api/technical")
 def technical(signal: str = "", limit: int = 80, min_lots: int = 1000):
     return {"items": engine.technical_list(signal or None, limit, min_lots), "factors": engine.get().get("factors", {}),
-            "labels": techmod.SIGNAL_LABELS, "factors": engine.get().get("factors", {}),
-            "labels": techmod.SIGNAL_LABELS, "date": engine.get().get("date")}
+            "labels": techmod.SIGNAL_LABELS, "date": engine.get().get("date"), "min_day_lots": REC_MIN_DAY_LOTS}
 
 @app.get("/api/chips")
 def chips(kind: str = "foreign_sudden", limit: int = 60, min_lots: int = 0):
-    return {"items": engine.chips_list(kind, limit, min_lots), "date": engine.get().get("date"), "tdcc_date": db.get_meta("tdcc_bulk_date")}
+    return {"items": engine.chips_list(kind, limit, min_lots), "date": engine.get().get("date"), "insti_date": engine.get().get("insti_date"),
+            "tdcc_date": db.get_meta("tdcc_bulk_date")}
 
 @app.get("/api/stock/{code}")
 def stock(code: str):

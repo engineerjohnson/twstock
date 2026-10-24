@@ -32,8 +32,8 @@
     </select>
     <input id="quickSearch" placeholder="代號 / 名稱 → 個股" autocomplete="off">
     <div id="searchBox" class="dropdown hidden"></div>
-    <button id="btnNews" class="primary only-server" title="重新抓取新聞與國際行情">🔄 更新新聞</button>
-    <button id="btnPrices" class="only-server" title="抓取最新行情 / 三大法人 / 融資券 / 基本面 / 集保">📊 更新行情/籌碼</button>
+    <button id="btnNews" class="primary" title="重新抓取新聞與國際行情">🔄 更新新聞</button>
+    <button id="btnPrices" title="抓取最新行情 / 三大法人 / 融資券 / 基本面 / 集保">📊 更新行情/籌碼</button>
     <button id="btnAI" class="ai only-server" title="用 Claude 解讀最新新聞與數據">🤖 AI 分析師解讀</button>
     <button id="btnTheme" class="icon" title="切換深色 / 淺色">🌙</button>
     <button id="btnMobile" class="only-server" title="手機連線 QR Code">手機連線</button>
@@ -88,7 +88,7 @@
       <button id="ttsPrev" class="sec" disabled>⏮ 上一則</button>
       <button id="ttsNext" class="sec" disabled>⏭ 下一則</button>
       <button id="ttsStop" class="sec" disabled>⏹ 停止</button>
-      <select id="ttsMode" title="播報內容"><option value="title">只唸標題</option><option value="summary" selected>標題＋摘要</option></select>
+      <select id="ttsMode" title="播報內容"><option value="title">只唸標題</option><option value="summary" selected>標題＋完整摘要</option></select>
       <select id="ttsSent" title="播報範圍"><option value="">全部新聞</option><option value="bull">只唸利多</option><option value="bear">只唸利空</option><option value="both">利多＋利空</option></select>
       <label class="small">語速 <input type="range" id="ttsRate" min="0.6" max="1.8" step="0.1" value="1.1" style="width:90px;vertical-align:middle"> <span id="ttsRateV">1.1x</span></label>
       <span class="muted" id="ttsStatus"></span>
@@ -99,7 +99,7 @@
   <!-- 推薦股 -->
   <section id="tab-recommend" class="tab">
     <div class="toolbar">
-      <p class="hint" style="margin:0">綜合評分 = 技術面 40% + 籌碼面 30% + 基本面 15% + 新聞面 15%。點擊列可看詳細理由，點代號開 K 線，★ 加入自選。<span id="recBuilt" class="muted"></span></p>
+      <p class="hint" style="margin:0">綜合評分 = 技術面 40% + 籌碼面 30% + 基本面 15% + 新聞面 15%。<b>前一交易日成交量未達 1 萬張的股票不列入推薦</b>。點擊列可看詳細理由，點代號開 K 線，★ 加入自選。<span id="recBuilt" class="muted"></span></p>
       <span class="sp"></span>
       <a class="btn only-server" id="expRec" href="/api/export?what=recommend" download>⬇ 匯出 CSV</a>
     </div>
@@ -121,6 +121,7 @@
         <option value="vol_surge">爆量上漲</option><option value="pullback_ma20">回測月線反彈</option><option value="rsi_rebound">RSI 超賣反彈</option>
         <option value="bb_breakout">布林收斂突破</option>
       </select>
+      <span class="muted" title="成交量太小的股票訊號不可靠，故一律排除">前一交易日成交量 ≥ 1 萬張</span>
       <span class="muted" id="techCount"></span>
       <span class="sp"></span>
       <button id="btnBacktest" class="sec">📈 訊號勝率回測</button>
@@ -135,6 +136,8 @@
   <section id="tab-chips" class="tab">
     <div class="toolbar">
       <select id="chipKind">
+        <option value="any_buy">法人 / 外資 / 大戶 近一日買超 (任一即列出，依買超金額排序)</option>
+        <option value="insti_top">三大法人合計 近一日買超金額排行</option>
         <option value="foreign_sudden">外資突然大買 (今日買超 ≥ 近5日均量3倍)</option>
         <option value="trust_sudden">投信突然大買</option>
         <option value="both_buy">外資 + 投信 同步買超</option>

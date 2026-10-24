@@ -26,12 +26,12 @@ def sync_prices(days=HISTORY_DAYS):
     now = datetime.datetime.now()
     _set("下載每日行情", 0, len(todo))
     for i, d in enumerate(todo):
-        got_any = False
+        got_any, failed = False, False
         for name, fn in (("TWSE", twse.fetch_daily), ("TPEx", tpex.fetch_daily)):
             try:
                 res = fn(d)
             except Exception as e:
-                _log(f"{name} {iso(d)} 失敗: {e}"); res = None
+                _log(f"{name} {iso(d)} 失敗: {e}"); res = None; failed = True
             if res:
                 rows, names = res
                 db.executemany("INSERT OR REPLACE INTO daily(code,date,open,high,low,close,volume,amount,txn) VALUES(?,?,?,?,?,?,?,?,?)", rows)
@@ -39,8 +39,8 @@ def sync_prices(days=HISTORY_DAYS):
                 got_any = True
         if got_any:
             db.mark_fetched("daily", iso(d), "ok")
-        elif d < now.date() or now.hour >= 15:
-            db.mark_fetched("daily", iso(d), "holiday")
+        elif d < now.date() and not failed:
+            db.mark_fetched("daily", iso(d), "holiday")  # 交易所明確回「無資料」才算假日；當天或抓取失敗都不標記，下次同步再試
         _set("下載每日行情", i + 1, len(todo))
     _log(f"行情同步完成 ({len(todo)} 日)")
 
@@ -50,11 +50,11 @@ def sync_insti(days=INSTI_DAYS):
     now = datetime.datetime.now()
     _set("下載三大法人", 0, len(todo))
     for i, d in enumerate(todo):
-        got_any = False
+        got_any, failed = False, False
         for name, fn in (("TWSE", twse.fetch_insti), ("TPEx", tpex.fetch_insti)):
             try: res = fn(d)
             except Exception as e:
-                _log(f"{name} 法人 {iso(d)} 失敗: {e}"); res = None
+                _log(f"{name} 法人 {iso(d)} 失敗: {e}"); res = None; failed = True
             if res:
                 db.executemany("INSERT OR REPLACE INTO insti(code,date,foreign_net,trust_net,dealer_net,total_net) VALUES(?,?,?,?,?,?)", res)
                 got_any = True
@@ -73,8 +73,8 @@ def sync_insti(days=INSTI_DAYS):
                 idx = twse.fetch_index_summary(d)
                 if idx: db.set_meta(f"index:{iso(d)}", idx)
             except Exception as e: _log(f"指數 {iso(d)}: {e}")
-        elif d < now.date() or now.hour >= 15:
-            db.mark_fetched("insti", iso(d), "holiday")
+        elif d < now.date() and not failed:
+            db.mark_fetched("insti", iso(d), "holiday")  # 法人資料約 16:00 後才公布；當天沒抓到或抓取失敗都不標記
         _set("下載三大法人", i + 1, len(todo))
     _log(f"法人同步完成 ({len(todo)} 日)")
 

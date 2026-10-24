@@ -3,6 +3,7 @@ import json, time, datetime
 from collections import defaultdict
 import numpy as np
 from .. import db
+from ..config import REC_MIN_DAY_LOTS
 from . import technical, chips, newsrules
 
 _cache = {"built": 0, "data": None}
@@ -123,7 +124,8 @@ def rebuild():
             s["chips"]["signals"] += tsig
             s["chips"]["chip_score"] = max(0, min(100, s["chips"]["chip_score"] + sum(x["w"] for x in tsig)))
             s["total"] = round(s["total"] + 0.30 * sum(x["w"] for x in tsig), 1)
-    data = {"date": last_date, "dates": dates[-60:], "stocks": result, "built": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    insti_date = max((r["date"] for r in insti), default=None)
+    data = {"date": last_date, "insti_date": insti_date, "dates": dates[-60:], "stocks": result, "built": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "elapsed": round(time.time() - t0, 1), "factors": factors}
     _cache.update(built=time.time(), data=data)
     print(f"engine.rebuild: {len(result)} stocks in {data['elapsed']}s", flush=True)
@@ -145,12 +147,16 @@ def candidates_for_tdcc(n=80):
 def liquid(s, min_lots):
     return (s.get("avg20_lots") or 0) >= (min_lots or 0)
 
+def day_liquid(s):
+    """推薦股 / 技術面起漲 的硬性門檻: 前一交易日 (最新資料日) 成交量 >= REC_MIN_DAY_LOTS 張。"""
+    return (s.get("lots") or 0) >= REC_MIN_DAY_LOTS
+
 def recommend(limit=40, min_lots=1000):
     d = get()
     out = []
     for s in sorted(d["stocks"].values(), key=lambda x: -x["total"]):
         if s["total"] < 15: break
-        if not liquid(s, min_lots): continue
+        if not liquid(s, min_lots) or not day_liquid(s): continue
         reasons = [x["label"] for x in s["tech"]["signals"] if x["w"] > 0][:5]
         if s["chips"]: reasons += [x["label"] for x in s["chips"]["signals"] if x["w"] > 0][:4]
         reasons += s["fund_why"][:2] + s["news_why"][:2]
@@ -163,7 +169,9 @@ def _brief(s):
             "amount": s["amount"], "lots": s.get("lots"), "avg20_lots": s.get("avg20_lots"), "avg20_amount": s.get("avg20_amount"), "vol_ratio": s["vol_ratio"], "trend": s["trend"], "bias20": s["bias20"], "total": s["total"],
             "tech_score": s["tech"]["tech_score"], "chip_score": s["chips"]["chip_score"] if s["chips"] else 0, "fund_score": s["fund_score"],
             "news_score": s["news_score"], "news_n": s["news_n"], "foreign": s["chips"]["foreign"] if s["chips"] else None,
-            "trust": s["chips"]["trust"] if s["chips"] else None, "foreign_streak": s["chips"]["foreign_streak"] if s["chips"] else 0,
+            "trust": s["chips"]["trust"] if s["chips"] else None, "dealer": s["chips"]["dealer"] if s["chips"] else None,
+            "insti_total": s["chips"].get("total") if s["chips"] else None, "insti_date": s["chips"]["date"] if s["chips"] else None,
+            "foreign_streak": s["chips"]["foreign_streak"] if s["chips"] else 0,
             "trust_streak": s["chips"]["trust_streak"] if s["chips"] else 0, "signals": [x["label"] for x in s["tech"]["signals"]],
             "chip_signals": [x["label"] for x in s["chips"]["signals"]] if s["chips"] else [], "tdcc": s.get("tdcc"),
             "fin_change": (s["chips"].get("margin") or {}).get("fin_change") if s["chips"] else None,
@@ -174,7 +182,7 @@ def technical_list(signal=None, limit=80, min_lots=1000):
     d = get()
     rows = []
     for s in d["stocks"].values():
-        if not liquid(s, min_lots): continue
+        if not liquid(s, min_lots) or not day_liquid(s): continue
         ids = [x["id"] for x in s["tech"]["signals"]]
         if signal and signal not in ids: continue
         if s["tech"]["tech_score"] < 20 or s["amount"] < 2e7: continue
@@ -191,6 +199,19 @@ def chips_list(kind="foreign_sudden", limit=60, min_lots=0):
         ids = [x["id"] for x in ch["signals"]]
         if kind == "foreign_top": key = ch["foreign"] * s["close"]
         elif kind == "trust_top": key = ch["trust"] * s["close"]
+        elif kind == "insti_top": key = (ch.get("total") or 0) * s["close"]           # 三大法人合計 近一日買超金額
+        elif kind == "any_buy":                                                        # 法人 / 外資 / 大戶 近一日買超 (任一)
+            td = s.get("tdcc") or {}
+            who = []
+            if ch["foreign"] > 0: who.append(f"外資+{ch['foreign']:,.0f}張")
+            if ch["trust"] > 0: who.append(f"投信+{ch['trust']:,.0f}張")
+            if ch["dealer"] > 0: who.append(f"自營+{ch['dealer']:,.0f}張")
+            if (ch.get("total") or 0) > 0: who.append(f"法人合計+{ch['total']:,.0f}張")
+            if (td.get("d_big400") or 0) > 0: who.append(f"大戶週{td['d_big400']:+.2f}%")
+            if not who: continue
+            key = max((ch.get("total") or 0), ch["foreign"], ch["trust"], ch["dealer"]) * s["close"]
+            if key <= 0: key = (td.get("d_big400") or 0) * 1e6
+            rows.append({**_brief(s), "key": key, "buyers": who}); continue
         elif kind == "foreign5": key = ch["foreign5"] * s["close"]
         elif kind == "trust5": key = ch["trust5"] * s["close"]
         elif kind == "big_up": key = (s.get("tdcc") or {}).get("d_big400") or 0

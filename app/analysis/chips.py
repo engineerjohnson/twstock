@@ -46,7 +46,8 @@ def analyze(insti_rows, close, volume_shares):
     if f[-1] < 0 and f[-1] * price * 1000 <= -1e8: sig.append({"id": "foreign_dump", "label": f"外資大賣 {abs(f[-1]):,.0f}張", "w": -15})
     if t[-1] < 0 and t[-1] * price * 1000 <= -3e7: sig.append({"id": "trust_dump", "label": f"投信大賣 {abs(t[-1]):,.0f}張", "w": -12})
     score = max(0, min(100, sum(x["w"] for x in sig)))
-    return {"foreign": round(f[-1]), "trust": round(t[-1]), "dealer": round(dl[-1]), "foreign5": round(f5), "trust5": round(t5),
+    return {"foreign": round(f[-1]), "trust": round(t[-1]), "dealer": round(dl[-1]), "total": round(f[-1] + t[-1] + dl[-1]),
+            "foreign5": round(f5), "trust5": round(t5),
             "foreign20": round(f20), "trust20": round(t20), "foreign_streak": fs, "trust_streak": ts,
             "signals": sig, "chip_score": score, "date": insti_rows[-1]["date"]}
 

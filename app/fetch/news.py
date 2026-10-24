@@ -35,7 +35,11 @@ def fetch_cnyes(limit=30):
                 nid = str(it.get("newsId"))
                 link = f"https://news.cnyes.com/news/id/{nid}"
                 content = _clean(it.get("content", ""))[:1200]
-                summary = _clean(it.get("summary") or "") or content[:300]
+                summary = _clean(it.get("summary") or "")
+                if len(content) > len(summary):  # 摘要常只有一句；改用內文前 600 字 (切在句尾)，播報時才唸得完整
+                    cut = content[:600]
+                    m = re.search(r"^.*[。！？]", cut, re.S)
+                    summary = (m.group(0) if m and len(m.group(0)) >= 120 else cut) or summary
                 stocks = [s for s in (it.get("stock") or []) if re.fullmatch(r"\d{4}", str(s))]
                 items.append({"id": "cnyes" + nid, "source": "鉅亨網", "category": label, "title": _clean(it.get("title")),
                               "link": link, "published": int(it.get("publishAt") or time.time()), "summary": summary,

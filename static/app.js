@@ -3,8 +3,25 @@ const $ = s => document.querySelector(s);
 const STATIC = !!window.STATIC_MODE;
 const api = async (p, opt) => { if (STATIC) return staticApi(p, opt); const r = await fetch(p, opt); if (!r.ok) throw new Error(p + ' ' + r.status); return r.json(); };
 /* ===== 靜態模式 (GitHub Pages)：所有 API 改讀預先產生的 JSON 檔，自選股存在瀏覽器 ===== */
-const _jcache = {};
-async function sjson(path) { if (_jcache[path]) return _jcache[path]; const r = await fetch('api/' + path + '?t=' + Math.floor(Date.now() / 600000)); if (!r.ok) throw new Error(path + ' ' + r.status); const j = await r.json(); _jcache[path] = j; return j; }
+let _jcache = {};
+let staticBuilt = null;   // 雲端版: 目前載入資料的產生時間 (status.json 的 built)，變了就清快取重新載入
+async function sjson(path, fresh = false) {
+  if (!fresh && _jcache[path]) return _jcache[path];
+  // status.json 每次都抓最新 (不走 CDN 快取)，其他檔案以 built 時間當版本號，GitHub 一更新就會抓到新檔
+  const ver = fresh ? Date.now() : (staticBuilt ? staticBuilt.replace(/\D/g, '') : Math.floor(Date.now() / 600000));
+  const r = await fetch('api/' + path + '?v=' + ver, fresh ? { cache: 'no-store' } : {}); if (!r.ok) throw new Error(path + ' ' + r.status);
+  const j = await r.json(); if (!fresh) _jcache[path] = j; return j;
+}
+let staticStatusData = {};
+async function staticStatus() {
+  const s = await sjson('status.json', true); staticStatusData = s;
+  if (s.built && s.built !== staticBuilt) {
+    const first = staticBuilt === null; staticBuilt = s.built; _jcache = {};
+    if (!first) { toast(`☁️ 雲端資料已更新 (${s.built})，重新載入中…`); Object.keys(loaded).forEach(k => loaders[k] && loaders[k]()); }
+    const n = $('#cloudNote'); if (n) { n.classList.remove('hidden'); n.textContent = `☁️ 雲端版 · 自動更新 ${s.built}（新聞每 30 分鐘、行情每交易日收盤後）`; }
+  }
+  return s;
+}
 const ML = [0, 500, 1000, 2000, 5000, 10000];
 const nearML = v => { v = Number(v || 0); return ML.reduce((a, b) => Math.abs(b - v) < Math.abs(a - v) ? b : a, ML[0]); };
 const lsGet = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch (e) { return d; } };
@@ -12,7 +29,8 @@ const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } ca
 async function staticApi(p, opt) {
   const u = new URL(p, location.href); const q = u.searchParams; const path = u.pathname.replace(/^.*\/api\//, '/api/');
   const method = (opt && opt.method) || 'GET'; const ml = nearML(q.get('min_lots') || 1000);
-  if (path === '/api/status') return sjson('status.json');
+  if (path === '/api/status') return staticStatus();
+  if (path === '/api/refresh') return ghDispatch(q.get('what') === 'all' ? 'full' : 'news');
   if (path === '/api/overview') return sjson(`overview_${ml}.json`);
   if (path === '/api/recommend') return sjson(`recommend_${ml}.json`);
   if (path === '/api/technical') return sjson(`technical_${q.get('signal') || 'all'}_${ml}.json`);
@@ -21,7 +39,7 @@ async function staticApi(p, opt) {
   if (path === '/api/sectors') return sjson('sectors.json');
   if (path === '/api/backtest') return sjson('backtest.json');
   if (path === '/api/ai') return method === 'POST' ? { result: 'unavailable' } : sjson('ai.json');
-  if (path === '/api/refresh' || path === '/api/tdcc_candidates') return { started: false };
+  if (path === '/api/tdcc_candidates') return { started: false };
   if (path === '/api/quotes') return { quotes: {}, trading: false };
   if (path === '/api/news') {
     const all = (await sjson('news.json')); const cat = q.get('cat'), sent = q.get('sent'), tag = q.get('tag'), kw = (q.get('q') || '').trim(), lim = +(q.get('limit') || 200);
@@ -57,6 +75,62 @@ async function staticApi(p, opt) {
   }
   throw new Error('static: unsupported ' + p);
 }
+/* ===== 雲端版手動更新：用 GitHub Token 觸發 Actions (workflow_dispatch)，再輪詢進度 ===== */
+const GH = { running: false, runId: null, startedAt: 0, timer: null };
+function ghRepo() {
+  const s = staticStatusData || {}; if (s.repo) return { repo: s.repo, workflow: s.workflow || 'update.yml', branch: s.branch || 'main' };
+  const m = location.hostname.match(/^([^.]+)\.github\.io$/); const seg = location.pathname.split('/').filter(Boolean)[0];
+  return m && seg ? { repo: `${m[1]}/${seg}`, workflow: 'update.yml', branch: 'main' } : null;
+}
+function ghToken() { try { return localStorage.getItem('ghToken') || ''; } catch (e) { return ''; } }
+function ghTokenModal(mode) {
+  const r = ghRepo(); const url = r ? `https://github.com/${r.repo}/actions/workflows/${r.workflow}` : '#';
+  openModal(`<h2>🔄 雲端版手動更新</h2>
+    <p>雲端版的資料由 GitHub 自動更新；要「立刻」更新，需要一把 GitHub Token 讓這個網頁幫你按下 Run workflow（只需設定一次，Token 只存在這支手機/瀏覽器裡）。</p>
+    <ol class="small">
+      <li>手機/電腦登入 GitHub → 開 <a href="https://github.com/settings/personal-access-tokens/new" target="_blank">建立 Fine-grained token</a></li>
+      <li>Token name 隨意；Expiration 選 1 年；Repository access 選 <b>Only select repositories</b> → 勾 <b>${esc(r ? r.repo.split('/')[1] : 'twstock')}</b></li>
+      <li>Permissions → Repository permissions → <b>Actions</b> 選 <b>Read and write</b> → Generate token → 複製貼到下面</li>
+    </ol>
+    <input id="ghTokenInput" placeholder="github_pat_…" style="width:100%" value="${esc(ghToken())}">
+    <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"><button class="primary" id="ghTokenSave">儲存並開始更新</button><a class="btn" href="${url}" target="_blank">不設定，改到 GitHub 手動按 Run workflow</a></div>
+    <p class="muted" style="margin-top:8px">更新約需 2～5 分鐘 (完整更新 6～10 分鐘)，完成後畫面會自動重新載入。</p>`);
+  $('#ghTokenSave').onclick = () => { const t = $('#ghTokenInput').value.trim(); if (!t) return toast('請貼上 Token'); try { localStorage.setItem('ghToken', t); } catch (e) { } $('#modal').classList.add('hidden'); ghDispatch(mode); };
+}
+async function ghApi(path, opt = {}) {
+  const r = await fetch('https://api.github.com' + path, { ...opt, headers: { Accept: 'application/vnd.github+json', Authorization: 'Bearer ' + ghToken(), 'X-GitHub-Api-Version': '2022-11-28', ...(opt.headers || {}) } });
+  if (r.status === 401 || r.status === 403 || r.status === 404) { try { localStorage.removeItem('ghToken'); } catch (e) { } throw new Error('Token 無效或權限不足 (需 Actions: Read and write)，請重新設定'); }
+  if (!r.ok) throw new Error('GitHub ' + r.status);
+  return r.status === 204 ? {} : r.json();
+}
+async function ghDispatch(mode) {
+  const r = ghRepo(); if (!r) { toast('無法判斷 GitHub repository'); return { started: false }; }
+  if (GH.running) { toast('GitHub 正在更新中，請稍候'); return { started: false }; }
+  if (!ghToken()) { ghTokenModal(mode); return { started: false }; }
+  try {
+    await ghApi(`/repos/${r.repo}/actions/workflows/${r.workflow}/dispatches`, { method: 'POST', body: JSON.stringify({ ref: r.branch, inputs: { mode } }) });
+  } catch (e) { toast('無法觸發更新：' + esc(e.message), 8000); if (!ghToken()) setTimeout(() => ghTokenModal(mode), 600); return { started: false }; }
+  GH.running = true; GH.runId = null; GH.startedAt = Date.now(); GH.mode = mode; const base = staticBuilt;
+  toast(mode === 'full' ? '已通知 GitHub 開始完整更新 (行情/法人/籌碼)，約 6～10 分鐘' : '已通知 GitHub 開始更新新聞與國際行情，約 2～5 分鐘');
+  const bar = $('#statusBar'); bar.classList.remove('hidden'); $('#statusText').textContent = '☁️ GitHub 更新中：排隊等待執行…'; $('#statusFill').style.width = '5%';
+  clearInterval(GH.timer);
+  GH.timer = setInterval(async () => {
+    const el = Math.round((Date.now() - GH.startedAt) / 1000);
+    try {
+      const runs = await ghApi(`/repos/${r.repo}/actions/workflows/${r.workflow}/runs?per_page=3&event=workflow_dispatch`);
+      const run = (runs.workflow_runs || []).find(x => new Date(x.created_at).getTime() >= GH.startedAt - 90000);
+      if (run) { GH.runId = run.id; const st = run.status === 'completed' ? (run.conclusion === 'success' ? '完成，等待網頁發布…' : '失敗 (' + run.conclusion + ')') : run.status === 'in_progress' ? '執行中' : '排隊中';
+        $('#statusText').textContent = `☁️ GitHub ${GH.mode === 'full' ? '完整更新' : '更新新聞'}：${st} (${Math.floor(el / 60)}分${el % 60}秒)`;
+        $('#statusFill').style.width = Math.min(95, 10 + el / (GH.mode === 'full' ? 6 : 2.4)) + '%';
+        if (run.status === 'completed' && run.conclusion !== 'success') { ghDone(); toast(`GitHub 更新失敗 (${run.conclusion})，請到 Actions 查看錯誤`, 10000); return; }
+      } else $('#statusText').textContent = `☁️ GitHub 更新中：排隊等待執行… (${el}秒)`;
+    } catch (e) { $('#statusText').textContent = `☁️ GitHub 更新中… (${el}秒)`; }
+    try { const s = await staticStatus(); if (s.built && s.built !== base) { ghDone(); toast('✅ 雲端資料已更新完成'); } } catch (e) { }
+    if (el > 1500) { ghDone(); toast('更新超過 25 分鐘仍未完成，請到 GitHub Actions 查看', 8000); }
+  }, 15000);
+  return { started: true };
+}
+function ghDone() { GH.running = false; clearInterval(GH.timer); $('#statusBar').classList.add('hidden'); }
 const fmt = (n, d = 2) => (n === null || n === undefined || isNaN(n)) ? '-' : Number(n).toLocaleString('zh-TW', { minimumFractionDigits: d, maximumFractionDigits: d });
 const pct = n => n === null || n === undefined ? '-' : `<span class="${n > 0 ? 'up' : n < 0 ? 'dn' : 'flat'}">${n > 0 ? '+' : ''}${fmt(n)}%</span>`;
 const signed = (n, d = 0) => { if (n === null || n === undefined) return '-'; const r = Math.round(n * 10 ** d) / 10 ** d; return `<span class="${r > 0 ? 'up' : r < 0 ? 'dn' : 'flat'}">${r > 0 ? '+' : ''}${fmt(r, d)}</span>`; };
@@ -118,7 +192,8 @@ async function pollStatus() {
   try {
     const s = await api('/api/status');
     const bar = $('#statusBar');
-    if (s.running) {
+    if (STATIC && GH.running) { /* GitHub 更新進度由 ghDispatch 自己顯示 */ }
+    else if (s.running) {
       bar.classList.remove('hidden');
       $('#statusText').textContent = `⏳ ${s.task === 'all' ? '完整同步' : '更新'}：${s.step} ${s.total ? `(${s.progress}/${s.total})` : ''}`;
       $('#statusFill').style.width = (s.total ? s.progress / s.total * 100 : 10) + '%';
@@ -132,10 +207,12 @@ async function pollStatus() {
     if (s.ai.running) { $('#btnAI').disabled = true; $('#btnAI').textContent = '🤖 AI 分析中…'; }
     else { $('#btnAI').disabled = false; $('#btnAI').textContent = '🤖 AI 分析師解讀'; if (aiWaiting) { aiWaiting = false; loadAI(); if (s.ai.error) toast('AI 分析失敗: ' + esc(s.ai.error)); } }
   } catch (e) { }
-  setTimeout(pollStatus, STATIC ? 60000 : 2500);
+  clearTimeout(pollStatus.t); pollStatus.t = setTimeout(pollStatus, STATIC ? 60000 : 2500);
 }
-$('#btnNews').onclick = async () => { await api('/api/refresh?what=news', { method: 'POST' }); toast('開始更新新聞與國際行情'); };
-$('#btnPrices').onclick = async () => { await api('/api/refresh?what=all', { method: 'POST' }); toast('開始更新行情 / 法人 / 融資券 / 基本面 / 集保'); };
+// 手機把網頁切到背景再切回來時，立刻檢查一次有沒有新資料 (雲端版新聞可能已更新)
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { clearTimeout(pollStatus.t); pollStatus(); } });
+$('#btnNews').onclick = async () => { const r = await api('/api/refresh?what=news', { method: 'POST' }); if (!STATIC) toast(r.started ? '開始更新新聞與國際行情' : '目前有其他更新進行中'); };
+$('#btnPrices').onclick = async () => { const r = await api('/api/refresh?what=all', { method: 'POST' }); if (!STATIC) toast(r.started ? '開始更新行情 / 法人 / 融資券 / 基本面 / 集保' : '目前有其他更新進行中'); };
 $('#btnAI').onclick = async () => {
   const r = await api('/api/ai', { method: 'POST' });
   if (r.result === 'unavailable') return toast('找不到 claude CLI 或 ANTHROPIC_API_KEY，無法執行 AI 分析');
@@ -221,12 +298,13 @@ async function loadNews() {
   newsItems = d.items;
   $('#newsList').innerHTML = d.items.map((r, i) => `<div class="item" data-idx="${i}">
     <div class="t"><span class="spk" data-idx="${i}" title="播報這一則">🔊</span>${sentBadge(r.sentiment)} <a href="${esc(r.link)}" target="_blank">${esc(r.title)}</a></div>
-    ${r.summary ? `<div class="s">${esc(r.summary.slice(0, 220))}${r.summary.length > 220 ? '…' : ''}</div>` : ''}
+    ${r.summary ? `<div class="s ${r.summary.length > 220 ? 'clip' : ''}" title="${r.summary.length > 220 ? '點一下展開全文' : ''}">${esc(r.summary)}</div>` : ''}
     <div class="m">${r.time} · ${esc(r.source)} · ${esc(r.category)} ${r.stock_names.map(s => codeLink(s.code, s.name)).join(' ')}
       ${(r.tags.topics || []).map(t => `<span class="badge t">${esc(t)}</span>`).join('')}${(r.tags.highlights || []).map(h => `<span class="badge f">${esc(h)}</span>`).join('')}
       ${(r.tags.bull || []).map(h => `<span class="badge bull">${esc(h)}</span>`).join('')}${(r.tags.bear || []).map(h => `<span class="badge bear">${esc(h)}</span>`).join('')}</div></div>`).join('') || '<p class="muted">沒有符合的新聞</p>';
 }
 ['#newsCat', '#newsSent', '#newsTag'].forEach(s => $(s).onchange = loadNews);
+$('#newsList').addEventListener('click', e => { const s = e.target.closest('.s.clip, .s.full'); if (s) { s.classList.toggle('clip'); s.classList.toggle('full'); } });
 $('#newsGo').onclick = loadNews; $('#newsQ').onkeydown = e => { if (e.key === 'Enter') loadNews(); };
 
 /* ---------- 共用列 ---------- */
@@ -249,7 +327,7 @@ function bindExpand(sel) { document.querySelectorAll(sel + ' tr.row').forEach(tr
 /* ---------- recommend ---------- */
 async function loadRecommend() {
   const d = await api('/api/recommend?limit=50&min_lots=' + minLots());
-  $('#recBuilt').textContent = ` 資料日 ${d.date}，計算於 ${d.built}，共 ${d.items.length} 檔 (點表頭排序：▼大→小 / ▲小→大 / 再點取消；Shift+點或開「多欄排序」可加次要欄位)`;
+  $('#recBuilt').textContent = ` 資料日 ${d.date}，計算於 ${d.built}，共 ${d.items.length} 檔。僅列前一交易日成交量 ≥ ${fmt(d.min_day_lots || 10000, 0)} 張者 (點表頭排序：▼大→小 / ▲小→大 / 再點取消；Shift+點或開「多欄排序」可加次要欄位)`;
   $('#expRec').href = '/api/export?what=recommend&min_lots=' + minLots();
   $('#recTable').innerHTML = HEAD + d.items.map(r => stockRow(r) + `<tr class="expand"><td colspan="${NCOL}"><b>推薦理由：</b>${r.reasons.map(x => `<span class="badge">${esc(x)}</span>`).join(' ')}
      ${r.risks.length ? `<br><b>風險：</b>${r.risks.map(x => `<span class="badge risk">${esc(x)}</span>`).join(' ')}` : ''}
@@ -262,7 +340,7 @@ async function loadRecommend() {
 async function loadTechnical() {
   const d = await api('/api/technical?signal=' + $('#techSignal').value + '&limit=100&min_lots=' + minLots());
   $('#techTable').innerHTML = HEAD + d.items.map(r => stockRow(r)).join('');
-  $('#techCount').textContent = `共 ${d.items.length} 檔 (點表頭排序：▼大→小 / ▲小→大 / 再點取消；Shift+點或開「多欄排序」可加次要欄位)`;
+  $('#techCount').textContent = `共 ${d.items.length} 檔。僅列前一交易日成交量 ≥ ${fmt(d.min_day_lots || 10000, 0)} 張者 (點表頭排序：▼大→小 / ▲小→大 / 再點取消)`;
   $('#expTech').href = '/api/export?what=technical&signal=' + $('#techSignal').value + '&min_lots=' + minLots();
   refreshLive(d.items.map(r => r.code));
 }
@@ -286,9 +364,12 @@ $('#btnBacktest').onclick = async () => {
 /* ---------- chips ---------- */
 async function loadChips() {
   const d = await api('/api/chips?kind=' + $('#chipKind').value + '&limit=80&min_lots=' + minLots());
-  $('#chipMeta').textContent = `資料日 ${d.date} · 集保週資料 ${d.tdcc_date || '-'} · 共 ${d.items.length} 檔 (點表頭排序：▼大→小 / ▲小→大 / 再點取消；Shift+點或開「多欄排序」可加次要欄位)`;
+  const stale = d.insti_date && d.date && d.insti_date < d.date ? ` ⚠️ 法人資料 (${d.insti_date}) 尚未更新到最新交易日` : '';
+  $('#chipMeta').textContent = `行情日 ${d.date} · 法人資料日 ${d.insti_date || '-'}${stale} · 集保週資料 ${d.tdcc_date || '-'} · 共 ${d.items.length} 檔 (點表頭排序：▼大→小 / ▲小→大 / 再點取消)`;
   $('#expChips').href = '/api/export?what=chips&kind=' + $('#chipKind').value + '&min_lots=' + minLots();
-  $('#chipTable').innerHTML = HEAD + d.items.map(r => stockRow(r)).join('') || '<tr><td>無符合</td></tr>';
+  const extra = r => (r.buyers || []).map(b => `<span class="badge ${b.startsWith('大戶') ? 'bull' : 'c'}">${esc(b)}</span>`).join('') + (r.dealer && !r.buyers ? `<span class="badge c">自營${r.dealer > 0 ? '+' : ''}${fmt(r.dealer, 0)}張</span>` : '');
+  $('#chipTable').innerHTML = (HEAD + d.items.map(r => stockRow(r, extra(r))).join('')) || '<tr><td>無符合</td></tr>';
+  if (!d.items.length) $('#chipTable').innerHTML = HEAD + `<tr><td colspan="${NCOL}" class="muted">無符合條件的股票</td></tr>`;
   refreshLive(d.items.map(r => r.code));
 }
 $('#chipKind').onchange = loadChips;
@@ -551,9 +632,12 @@ const loaders = { overview: loadOverview, news: loadNews, recommend: loadRecomme
 try { applyTheme(localStorage.getItem('theme') || 'dark'); } catch (e) { applyTheme('dark'); }
 if (STATIC) {
   document.body.classList.add('static');
-  const av = document.querySelector('#aiView p'); if (av) av.textContent = '雲端版：在 GitHub 的 Settings → Secrets 加入 ANTHROPIC_API_KEY 後，每個交易日 15:30 與早上 08:00 會自動產生 AI 分析師報告。';
+  const av = document.querySelector('#aiView p'); if (av) av.textContent = '雲端版：在 GitHub 的 Settings → Secrets 加入 ANTHROPIC_API_KEY 後，每個交易日收盤後與早上 08:00 會自動產生 AI 分析師報告。';
   const wh = document.querySelector('#tab-watchlist .hint'); if (wh) wh.textContent = '雲端版：自選股存在這支手機/瀏覽器裡（換裝置不會同步）。顯示每日收盤資料；點列展開可編輯備註。';
-  sjson('status.json').then(s => { const n = $('#cloudNote'); n.classList.remove('hidden'); n.textContent = `☁️ 雲端版 · 自動更新 ${s.built || ''}（新聞每 2 小時、行情每交易日 15:30 後）`; }).catch(() => { });
+  $('#btnNews').title = '通知 GitHub 立刻更新新聞與國際行情 (約 2～5 分鐘；第一次需設定 Token)';
+  $('#btnPrices').title = '通知 GitHub 立刻做完整更新：行情 / 法人 / 融資券 / 集保 (約 6～10 分鐘)';
+  // 長按 / 右鍵 更新按鈕 → 重新設定 Token
+  ['#btnNews', '#btnPrices'].forEach(s => $(s).oncontextmenu = e => { e.preventDefault(); ghTokenModal(s === '#btnNews' ? 'news' : 'full'); });
 }
 (async () => {
   try { const d = await api('/api/watchlist'); watchSet = new Set(d.items.map(i => i.code)); $('#wlCount').textContent = d.items.length || ''; liveTrading = d.trading; $('#liveBar').classList.toggle('hidden', !liveTrading); } catch (e) { }
@@ -594,13 +678,37 @@ function ttsVoice() {
 }
 if (ttsOK) { speechSynthesis.onvoiceschanged = () => { }; speechSynthesis.getVoices(); }
 function ttsClean(t) { return String(t || '').replace(/〈|〉|《|》|【|】|「|」|『|』/g, '，').replace(/\s+/g, ' ').replace(/[|｜]/g, '，').replace(/(\d{4})-TW/g, '$1'); }
-function ttsSplit(text) { return ttsClean(text).split(/(?<=[。！？!?；;])/).map(s => s.trim()).filter(s => s.length > 1); }
+/* 切成短句：Chrome / Android 的語音引擎對過長的一段話 (約 >200 字或 >15 秒) 會無聲中斷、onend 不觸發，
+   所以先依句號切，太長的句子再依逗號切，仍太長就硬切，每段 ≤ TTS_MAX 字；內容再長也會一段一段唸完。 */
+const TTS_MAX = 60;
+function ttsSplit(text) {
+  const out = [];
+  const push = s => { s = s.trim(); if (s.length > 1) out.push(s); };
+  for (const sent of ttsClean(text).split(/(?<=[。！？!?；;\n])/)) {
+    if (sent.trim().length <= TTS_MAX) { push(sent); continue; }
+    let buf = '';
+    for (const piece of sent.split(/(?<=[，、,：:])/)) {
+      if ((buf + piece).length > TTS_MAX && buf) { push(buf); buf = ''; }
+      if (piece.length > TTS_MAX) { for (let i = 0; i < piece.length; i += TTS_MAX) push(piece.slice(i, i + TTS_MAX)); }
+      else buf += piece;
+    }
+    push(buf);
+  }
+  return out;
+}
+/* 桌面版 Chrome 的已知問題：連續朗讀約 15 秒後會靜音卡住；定時 pause/resume 可避免 (手機不需要、也不能這樣做) */
+const TTS_DESKTOP_CHROME = /Chrome/.test(navigator.userAgent) && !/Mobile|Android|iPhone|iPad/.test(navigator.userAgent);
+let ttsKeep = null;
+function ttsKeepAlive(on) {
+  clearInterval(ttsKeep); ttsKeep = null;
+  if (on && TTS_DESKTOP_CHROME) ttsKeep = setInterval(() => { if (TTS.playing && !TTS.paused && speechSynthesis.speaking) { speechSynthesis.pause(); speechSynthesis.resume(); } }, 10000);
+}
 function ttsSetUI() {
   const on = TTS.playing;
   ['#ttsPause', '#ttsPrev', '#ttsNext', '#ttsStop'].forEach(s => { const b = $(s); if (b) b.disabled = !on; });
   const p = $('#ttsPause'); if (p) p.textContent = TTS.paused ? '▶ 繼續' : '⏸ 暫停';
   const pl = $('#ttsPlay'); if (pl) pl.textContent = on ? '🔊 播報中…' : '🔊 播報全部';
-  const st = $('#ttsStatus'); if (st) st.textContent = on ? `第 ${TTS.idx + 1} / ${TTS.queue.length} 則` : '';
+  const st = $('#ttsStatus'); if (st) st.textContent = on ? `第 ${TTS.idx + 1} / ${TTS.queue.length} 則${TTS.paused ? ' (已暫停)' : ''}` : '';
   document.querySelectorAll('.speaking').forEach(e => e.classList.remove('speaking'));
   if (on && TTS.kind === 'news') { const el = document.querySelector(`#newsList .item[data-idx="${TTS.queue[TTS.idx].i}"]`); if (el) { el.classList.add('speaking'); el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } }
   const bar = $('#ttsNow');
@@ -625,21 +733,30 @@ function ttsSetUI() {
 function ttsSpeakItem() {
   if (!TTS.playing || TTS.idx < 0 || TTS.idx >= TTS.queue.length) { ttsStop(); if (TTS.idx >= TTS.queue.length && TTS.queue.length) toast('播報完畢'); return; }
   const item = TTS.queue[TTS.idx]; ttsSetUI();
-  const parts = ttsSplit(item.text); let k = 0;
+  const parts = ttsSplit(item.text); let k = 0; const myIdx = TTS.idx; const myGen = TTS.gen;
   const rate = parseFloat($('#ttsRate') ? $('#ttsRate').value : 1.1) || 1.1; const voice = ttsVoice();
+  TTS.parts = parts.length;
   const next = () => {
-    if (!TTS.playing) return;
+    if (!TTS.playing || TTS.idx !== myIdx || TTS.gen !== myGen) return;   // 已停止 / 跳到別則，放棄這一則剩下的段落
+    clearTimeout(TTS.watch);
     if (k >= parts.length) { TTS.idx++; setTimeout(ttsSpeakItem, 350); return; }
-    const u = new SpeechSynthesisUtterance(parts[k++]); u.lang = 'zh-TW'; u.rate = rate; if (voice) u.voice = voice;
-    u.onend = next;
+    const txt = parts[k++]; TTS.part = k;
+    const u = new SpeechSynthesisUtterance(txt); u.lang = 'zh-TW'; u.rate = rate; if (voice) u.voice = voice;
+    let done = false;
+    const finish = () => { if (done) return; done = true; clearTimeout(TTS.watch); next(); };
+    u.onend = finish;
     u.onerror = e => {
       if (e.error === 'interrupted' || e.error === 'canceled') return;
       if (e.error === 'not-allowed') { ttsStop(); toast('瀏覽器需要你親自點一下播報按鈕才能發聲 (iPhone 請關閉靜音鍵)'); return; }
       TTS.errors = (TTS.errors || 0) + 1; console.warn('tts', e.error);
       if (TTS.errors > 5) { ttsStop(); toast('語音播報發生錯誤: ' + e.error); return; }
-      next();
+      finish();
     };
     TTS.utter = u; speechSynthesis.speak(u);
+    // 看門狗：若引擎卡住 (常見於長段落 onend 不觸發)，依字數估算時間 + 8 秒後強制跳到下一段，確保整篇唸完
+    const est = (txt.length / 3.5) / rate * 1000 + 8000;
+    TTS.watch = setTimeout(() => { if (!done && TTS.playing && !TTS.paused) { console.warn('tts watchdog', txt.slice(0, 20)); speechSynthesis.cancel(); setTimeout(finish, 150); } }, est);
+    const st = $('#ttsStatus'); if (st && parts.length > 1) st.textContent = `第 ${TTS.idx + 1} / ${TTS.queue.length} 則 · 段落 ${k}/${parts.length}`;
   };
   next();
 }
@@ -647,15 +764,17 @@ function ttsStart(queue, kind) {
   if (!ttsOK) return toast('此瀏覽器不支援語音播報');
   if (!queue.length) return toast('沒有可播報的內容');
   speechSynthesis.cancel();
-  TTS.queue = queue; TTS.idx = 0; TTS.playing = true; TTS.paused = false; TTS.kind = kind; TTS.errors = 0;
+  TTS.queue = queue; TTS.idx = 0; TTS.playing = true; TTS.paused = false; TTS.kind = kind; TTS.errors = 0; TTS.gen = (TTS.gen || 0) + 1;
+  ttsKeepAlive(true);
   ttsSpeakItem();
 }
-function ttsStop() { TTS.playing = false; TTS.paused = false; TTS.queue = []; TTS.idx = -1; if (ttsOK) speechSynthesis.cancel(); ttsSetUI(); }
-function ttsJump(d) { if (!TTS.playing) return; speechSynthesis.cancel(); TTS.idx = Math.max(0, TTS.idx + d); TTS.paused = false; setTimeout(ttsSpeakItem, 200); }
+function ttsStop() { TTS.playing = false; TTS.paused = false; TTS.queue = []; TTS.idx = -1; TTS.gen = (TTS.gen || 0) + 1; clearTimeout(TTS.watch); ttsKeepAlive(false); if (ttsOK) speechSynthesis.cancel(); ttsSetUI(); }
+function ttsJump(d) { if (!TTS.playing) return; clearTimeout(TTS.watch); TTS.gen = (TTS.gen || 0) + 1; speechSynthesis.cancel(); TTS.idx = Math.max(0, TTS.idx + d); TTS.paused = false; setTimeout(ttsSpeakItem, 200); }
 function newsQueue(filterSent) {
   const mode = $('#ttsMode').value;
+  // 標題＋摘要模式：摘要「完整」朗讀 (不截斷)，由 ttsSplit 切成短段逐段唸完
   return newsItems.map((r, i) => ({ r, i })).filter(({ r }) => !filterSent || (filterSent === 'bull' && r.sentiment > 0) || (filterSent === 'bear' && r.sentiment < 0) || (filterSent === 'both' && r.sentiment !== 0))
-    .map(({ r, i }) => ({ i, title: r.title, link: r.link, text: `${r.sentiment > 0 ? '利多。' : r.sentiment < 0 ? '利空。' : ''}${r.title}。${mode === 'summary' && r.summary ? r.summary.slice(0, 160) + '。' : ''}` }));
+    .map(({ r, i }) => ({ i, title: r.title, link: r.link, text: `${r.sentiment > 0 ? '利多。' : r.sentiment < 0 ? '利空。' : ''}${r.title}。${mode === 'summary' && r.summary && r.summary.trim() !== r.title.trim() ? r.summary + '。' : ''}` }));
 }
 if ($('#ttsPlay')) {
   $('#ttsPlay').onclick = () => { if (TTS.playing) return; ttsStart(newsQueue($('#ttsSent').value), 'news'); };
@@ -673,9 +792,10 @@ if ($('#ttsOverview')) {
     const q = [];
     q.push({ i: -1, title: '國際市場對台股影響', text: `國際市場對台股影響。${d.impact.view}。${d.impact.notes.join('。')}` });
     if (d.ai) q.push({ i: -1, title: 'AI 分析師觀點', text: `AI分析師觀點，立場${d.ai.stance}。${d.ai.market_view}。重點事件。${(d.ai.key_events || []).join('。')}。看漲個股。${(d.ai.bullish_stocks || []).map(s => `${s.name}，${s.reason}`).join('。')}` });
-    d.bull_news.forEach((n, k) => q.push({ i: -1, title: n.title, link: n.link, text: (k === 0 ? '利多消息。' : '') + n.title }));
-    d.bear_news.forEach((n, k) => q.push({ i: -1, title: n.title, link: n.link, text: (k === 0 ? '利空消息。' : '') + n.title }));
-    d.recommend.slice(0, 5).forEach((r, k) => q.push({ i: -1, title: `${r.code} ${r.name}`, code: r.code, text: (k === 0 ? '今日綜合推薦。' : '') + `${r.name}，總分${Math.round(r.total)}，${r.reasons.slice(0, 2).join('，')}` }));
+    d.bull_news.forEach((n, k) => q.push({ i: -1, title: n.title, link: n.link, text: (k === 0 ? '利多消息。' : '') + n.title + (n.summary && n.summary.trim() !== n.title.trim() ? '。' + n.summary : '') }));
+    d.bear_news.forEach((n, k) => q.push({ i: -1, title: n.title, link: n.link, text: (k === 0 ? '利空消息。' : '') + n.title + (n.summary && n.summary.trim() !== n.title.trim() ? '。' + n.summary : '') }));
+    d.recommend.slice(0, 5).forEach((r, k) => q.push({ i: -1, title: `${r.code} ${r.name}`, code: r.code, text: (k === 0 ? '今日綜合推薦。' : '') + `${r.name}，總分${Math.round(r.total)}，${r.reasons.join('，')}` }));
+    (d.foreign_sudden || []).slice(0, 5).forEach((r, k) => q.push({ i: -1, title: `${r.code} ${r.name}`, code: r.code, text: (k === 0 ? '外資突然大買。' : '') + `${r.name}，${(r.chip_signals || []).slice(0, 2).join('，')}` }));
     ttsStart(q, 'overview'); toast('開始播報，再按一次「播報重點」可停止');
   };
 }

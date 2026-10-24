@@ -3,13 +3,13 @@
 """
 import os, sys, json, datetime, shutil, time
 from . import db
-from .config import BASE_DIR, STATIC_DIR
+from .config import BASE_DIR, STATIC_DIR, REC_MIN_DAY_LOTS
 from .analysis import engine, market, ai, backtest, technical
 from .analysis.technical import SIGNAL_LABELS
 
 MIN_LOTS = [0, 500, 1000, 2000, 5000, 10000]
-CHIP_KINDS = ["foreign_sudden", "trust_sudden", "both_buy", "foreign_streak", "trust_streak", "foreign_top", "trust_top", "foreign5", "trust5",
-              "big_up", "big400_up", "fin_drop", "short_up"]
+CHIP_KINDS = ["any_buy", "insti_top", "foreign_sudden", "trust_sudden", "both_buy", "foreign_streak", "trust_streak", "foreign_top", "trust_top",
+              "foreign5", "trust5", "big_up", "big400_up", "fin_drop", "short_up"]
 RANK_KINDS = ["gainers", "losers", "volume", "amount", "vol_ratio", "foreign", "foreign_sell", "trust", "fin_up"]
 
 def _dump(path, obj):
@@ -52,7 +52,9 @@ def build(out=None):
     _dump(os.path.join(api, "status.json"), {"running": False, "task": "", "step": "", "progress": 0, "total": 0, "log": [], "error": None,
           "last_sync": db.get_meta("last_sync"), "news_updated": db.get_meta("news_updated"), "data_date": d.get("date"), "n_stocks": len(d["stocks"]),
           "n_dates": len(d.get("dates", [])), "tdcc_date": db.get_meta("tdcc_bulk_date"), "fund_updated": db.get_meta("fundamentals_updated"),
-          "trading": False, "ai": {"running": False, "error": None, "mode": "static"}, "built": now, "static": True})
+          "insti_date": d.get("insti_date"), "min_day_lots": REC_MIN_DAY_LOTS,
+          "trading": False, "ai": {"running": False, "error": None, "mode": "static"}, "built": now, "static": True,
+          "repo": os.environ.get("GITHUB_REPOSITORY", ""), "workflow": "update.yml", "branch": os.environ.get("GITHUB_REF_NAME", "main")})
     # overview / recommend / technical / chips / rankings per min_lots
     news = _news_rows()
     strong = sorted([r for r in news if r["sentiment"] != 0], key=lambda r: (-abs(r["tags"].get("score", 0)), -r["published"]))
@@ -63,12 +65,13 @@ def build(out=None):
               "bull_news": [r for r in strong if r["sentiment"] > 0][:8], "bear_news": [r for r in strong if r["sentiment"] < 0][:8],
               "latest_news": news[:12], "ai": rep, "recommend": engine.recommend(10, ml),
               "foreign_sudden": engine.chips_list("foreign_sudden", 8, ml), "trust_sudden": engine.chips_list("trust_sudden", 8, ml), "data_date": d.get("date")})
-        _dump(os.path.join(api, f"recommend_{ml}.json"), {"items": engine.recommend(50, ml), "date": d.get("date"), "built": d.get("built")})
+        _dump(os.path.join(api, f"recommend_{ml}.json"), {"items": engine.recommend(50, ml), "date": d.get("date"), "built": d.get("built"), "min_day_lots": REC_MIN_DAY_LOTS})
         for sig in [""] + list(SIGNAL_LABELS):
             _dump(os.path.join(api, f"technical_{sig or 'all'}_{ml}.json"), {"items": engine.technical_list(sig or None, 100, ml), "date": d.get("date"),
-                                                                             "factors": d.get("factors", {}), "labels": SIGNAL_LABELS})
+                                                                             "factors": d.get("factors", {}), "labels": SIGNAL_LABELS, "min_day_lots": REC_MIN_DAY_LOTS})
         for kind in CHIP_KINDS:
-            _dump(os.path.join(api, f"chips_{kind}_{ml}.json"), {"items": engine.chips_list(kind, 80, ml), "date": d.get("date"), "tdcc_date": db.get_meta("tdcc_bulk_date")})
+            _dump(os.path.join(api, f"chips_{kind}_{ml}.json"), {"items": engine.chips_list(kind, 80, ml), "date": d.get("date"), "insti_date": d.get("insti_date"),
+                                                                  "tdcc_date": db.get_meta("tdcc_bulk_date")})
         for kind in RANK_KINDS:
             _dump(os.path.join(api, f"rankings_{kind}_{ml}.json"), {"items": engine.rankings(kind, 60, ml), "date": d.get("date")})
     _dump(os.path.join(api, "sectors.json"), {"items": engine.sectors(), "date": d.get("date")})

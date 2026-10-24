@@ -13,6 +13,7 @@ PORT = int(os.environ.get("PORT", "8765"))
 
 HISTORY_DAYS = 90          # calendar days of daily K to keep/fetch initially (~60 trading days)
 INSTI_DAYS = 35            # calendar days of institutional data (~25 trading days)
+REC_MIN_DAY_LOTS = 10000  # 推薦股 / 技術面起漲: 前一交易日成交量需 >= 1 萬張才列入
 REQUEST_SLEEP = 0.7        # seconds between TWSE/TPEx requests (be polite, avoid blocks)
 HTTP_HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130 Safari/537.36",
                 "Accept-Language": "zh-TW,zh;q=0.9"}
