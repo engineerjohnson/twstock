@@ -99,8 +99,12 @@ function ghTokenModal(mode) {
 }
 async function ghApi(path, opt = {}) {
   const r = await fetch('https://api.github.com' + path, { ...opt, headers: { Accept: 'application/vnd.github+json', Authorization: 'Bearer ' + ghToken(), 'X-GitHub-Api-Version': '2022-11-28', ...(opt.headers || {}) } });
-  if (r.status === 401 || r.status === 403 || r.status === 404) { try { localStorage.removeItem('ghToken'); } catch (e) { } throw new Error('Token 無效或權限不足 (需 Actions: Read and write)，請重新設定'); }
-  if (!r.ok) throw new Error('GitHub ' + r.status);
+  if (!r.ok) {
+    let msg = ''; try { msg = (await r.json()).message || ''; } catch (e) { }
+    const hint = r.status === 401 ? 'Token 無效或已過期/已撤銷' : r.status === 404 ? `找不到 ${path.split('/actions')[0].replace('/repos/', '')}：Token 的 Repository access 沒有勾到這個 repository (或 Token 是別的帳號建立的)` : r.status === 403 ? 'Token 權限不足：Repository permissions → Actions 要選 Read and write' : 'GitHub 錯誤';
+    if (r.status === 401 || r.status === 403 || r.status === 404) { try { localStorage.removeItem('ghToken'); } catch (e) { } }
+    throw new Error(`${hint} (HTTP ${r.status}${msg ? '：' + msg : ''})`);
+  }
   return r.status === 204 ? {} : r.json();
 }
 async function ghDispatch(mode) {

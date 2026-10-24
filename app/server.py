@@ -154,6 +154,10 @@ def stock(code: str):
             from .fetch import intl as intlf
             info = d["info"]
             rows = intlf.fetch_stock_history(code, info.get("market") or "TWSE")
+            # 只補「比本機最早一天更早」的歷史；Yahoo 的休市日佔位列 (量 0、四價相同) 或比本機更新的日期一律不寫入，
+            # 否則會把全市場的資料日推到假日、讓推薦/技術面全部消失
+            first = d["bars"][0]["time"] if d["bars"] else "9999-99-99"
+            rows = [r for r in rows if r[1] < first and (r[6] or 0) > 0]
             if rows:
                 db.executemany("INSERT OR IGNORE INTO daily(code,date,open,high,low,close,volume,amount,txn) VALUES(?,?,?,?,?,?,?,?,?)", rows)
                 d = engine.stock_detail(code)

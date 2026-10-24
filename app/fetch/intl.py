@@ -39,6 +39,7 @@ def fetch_stock_history(code, market, period="1y"):
     rows = []
     for i, r in df.iterrows():
         if any(isinstance(r[k], float) and math.isnan(r[k]) for k in ("Open", "High", "Low", "Close")): continue
+        if not r["Volume"] or (isinstance(r["Volume"], float) and math.isnan(r["Volume"])): continue  # 休市日佔位列 (量 0) 不要
         rows.append((code, str(i.date()), float(r["Open"]), float(r["High"]), float(r["Low"]), float(r["Close"]),
                      float(r["Volume"]), None, None))
     return rows
