@@ -42,7 +42,7 @@ async function staticApi(p, opt) {
   if (path === '/api/tdcc_candidates') return { started: false };
   if (path === '/api/quotes') return { quotes: {}, trading: false };
   if (path === '/api/daytrade/live') return { items: [], total: 0, trading: false, static: true };
-  if (path === '/api/daytrade/close') { if (method === 'POST') return { started: false }; try { return await sjson('daytrade_close.json'); } catch (e) { return { report: {}, status: {} }; } }
+  if (path === '/api/daytrade/close') { if (method === 'POST') return ghDispatch('news', '更新當沖收盤名單 (抓券商分點)'); try { return await sjson('daytrade_close.json'); } catch (e) { return { report: {}, status: {} }; } }
   if (path === '/api/daytrade/verify') { try { return await sjson('daytrade_verify.json'); } catch (e) { return { days: [], summary: {} }; } }
   if (path.startsWith('/api/daytrade/')) return { bars: [] };
   if (path === '/api/news') {
@@ -111,15 +111,15 @@ async function ghApi(path, opt = {}) {
   }
   return r.status === 204 ? {} : r.json();
 }
-async function ghDispatch(mode) {
+async function ghDispatch(mode, label) {
   const r = ghRepo(); if (!r) { toast('無法判斷 GitHub repository'); return { started: false }; }
   if (GH.running) { toast('GitHub 正在更新中，請稍候'); return { started: false }; }
   if (!ghToken()) { ghTokenModal(mode); return { started: false }; }
   try {
     await ghApi(`/repos/${r.repo}/actions/workflows/${r.workflow}/dispatches`, { method: 'POST', body: JSON.stringify({ ref: r.branch, inputs: { mode } }) });
   } catch (e) { toast('無法觸發更新：' + esc(e.message), 8000); if (!ghToken()) setTimeout(() => ghTokenModal(mode), 600); return { started: false }; }
-  GH.running = true; GH.runId = null; GH.startedAt = Date.now(); GH.mode = mode; const base = staticBuilt;
-  toast(mode === 'full' ? '已通知 GitHub 開始完整更新 (行情/法人/籌碼)，約 6～10 分鐘' : '已通知 GitHub 開始更新新聞與國際行情，約 2～5 分鐘');
+  GH.running = true; GH.runId = null; GH.startedAt = Date.now(); GH.mode = mode; GH.label = label || (mode === 'full' ? '完整更新' : '更新新聞'); const base = staticBuilt;
+  toast(label ? `已通知 GitHub 開始${label}，約 2～5 分鐘；分點若尚未公布 (通常 16:00~18:00) 名單不會變` : mode === 'full' ? '已通知 GitHub 開始完整更新 (行情/法人/籌碼)，約 6～10 分鐘' : '已通知 GitHub 開始更新新聞與國際行情，約 2～5 分鐘');
   const bar = $('#statusBar'); bar.classList.remove('hidden'); $('#statusText').textContent = '☁️ GitHub 更新中：排隊等待執行…'; $('#statusFill').style.width = '5%';
   clearInterval(GH.timer);
   GH.timer = setInterval(async () => {
@@ -128,12 +128,12 @@ async function ghDispatch(mode) {
       const runs = await ghApi(`/repos/${r.repo}/actions/workflows/${r.workflow}/runs?per_page=3&event=workflow_dispatch`);
       const run = (runs.workflow_runs || []).find(x => new Date(x.created_at).getTime() >= GH.startedAt - 90000);
       if (run) { GH.runId = run.id; const st = run.status === 'completed' ? (run.conclusion === 'success' ? '完成，等待網頁發布…' : '失敗 (' + run.conclusion + ')') : run.status === 'in_progress' ? '執行中' : '排隊中';
-        $('#statusText').textContent = `☁️ GitHub ${GH.mode === 'full' ? '完整更新' : '更新新聞'}：${st} (${Math.floor(el / 60)}分${el % 60}秒)`;
+        $('#statusText').textContent = `☁️ GitHub ${GH.label}：${st} (${Math.floor(el / 60)}分${el % 60}秒)`;
         $('#statusFill').style.width = Math.min(95, 10 + el / (GH.mode === 'full' ? 6 : 2.4)) + '%';
         if (run.status === 'completed' && run.conclusion !== 'success') { ghDone(); toast(`GitHub 更新失敗 (${run.conclusion})，請到 Actions 查看錯誤`, 10000); return; }
       } else $('#statusText').textContent = `☁️ GitHub 更新中：排隊等待執行… (${el}秒)`;
     } catch (e) { $('#statusText').textContent = `☁️ GitHub 更新中… (${el}秒)`; }
-    try { const s = await staticStatus(); if (s.built && s.built !== base) { ghDone(); toast('✅ 雲端資料已更新完成'); } } catch (e) { }
+    try { const s = await staticStatus(); if (s.built && s.built !== base) { ghDone(); toast('✅ 雲端資料已更新完成'); if (typeof loadDaytradeClose === 'function') { loadDaytradeClose(); loadDaytradeVerify(); } } } catch (e) { }
     if (el > 1500) { ghDone(); toast('更新超過 25 分鐘仍未完成，請到 GitHub Actions 查看', 8000); }
   }, 15000);
   return { started: true };

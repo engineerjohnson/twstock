@@ -171,5 +171,5 @@ async function loadDaytradeVerify() {
     $('#dtVerifyTable').innerHTML = `<tr><th>股票</th><th>類型</th><th class="num">分數</th><th class="num">名單日收盤</th><th class="num" title="隔日開盤相對名單日收盤">跳空</th><th class="num" title="隔日 開盤→收盤 (盤中為現價)">開→收</th><th class="num" title="隔日收盤相對名單日收盤">漲跌</th><th class="num" title="開盤後順向最大幅度">最佳</th><th>結果</th></tr>` + rows.join('');
   } catch (e) { $('#dtVerifyMeta').textContent = '讀取失敗：' + e.message; }
 }
-$('#dtCloseRebuild').onclick = async () => { const r = await api('/api/daytrade/close?force=1', { method: 'POST' }); toast(r.started ? '開始抓券商分點並重新判斷 (約 1～2 分鐘)' : '目前正在計算中'); setTimeout(loadDaytradeClose, 1500); };
+$('#dtCloseRebuild').onclick = async () => { const r = await api('/api/daytrade/close?force=1', { method: 'POST' }); if (!STATIC) { toast(r.started ? '開始抓券商分點並重新判斷 (約 1～2 分鐘)' : '目前正在計算中'); setTimeout(loadDaytradeClose, 1500); } };
 loaders.daytrade = loadDaytrade;

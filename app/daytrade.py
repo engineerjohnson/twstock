@@ -572,7 +572,7 @@ SEED_PATH = os.path.join(os.path.dirname(__file__), "seed", "daytrade_history.js
 def export_history(path=SEED_PATH):
     """把每日名單 / 加權指數 / 臺指期歷史 (meta) 匯出成種子檔，讓雲端版 (每次都是新資料庫) 也能顯示名單驢證。部署前執行。"""
     out = {}
-    for pre in ("daytrade_close:", "index:", "tx_futures:"):
+    for pre in ("daytrade_close", "index:", "tx_futures:"):   # daytrade_close 同時匹配目前名單與 daytrade_close:日期 的歷史
         for r in db.query("SELECT key, value FROM meta WHERE key LIKE ?", (pre + "%",)):
             try: out[r["key"]] = json.loads(r["value"])
             except Exception: out[r["key"]] = r["value"]
@@ -586,7 +586,7 @@ def import_history(path=SEED_PATH):
     try:
         with open(path, encoding="utf-8") as f: data = json.load(f)
     except Exception as e: print("import_history", e); return 0
-    have = {r["key"] for r in db.query("SELECT key FROM meta WHERE key LIKE 'daytrade_close:%' OR key LIKE 'index:%' OR key LIKE 'tx_futures:%'")}
+    have = {r["key"] for r in db.query("SELECT key FROM meta WHERE key LIKE 'daytrade_close%' OR key LIKE 'index:%' OR key LIKE 'tx_futures:%'")}
     n = 0
     for k, v in data.items():
         if k not in have: db.set_meta(k, v); n += 1
