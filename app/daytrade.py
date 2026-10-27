@@ -324,7 +324,7 @@ def _loop():
                     except Exception as e: print("futures hist", e)
                 except Exception as e: print("archive bars", e)
             # 收盤後: 先確定今日行情已入庫 (14:40 後), 再抓分點做隔日判斷 (分點資料約 16:00~18:00 公布)
-            if traded_today and now.time() >= datetime.time(14, 40) and _price_sync_date != today:
+            if now.weekday() < 5 and now.time() >= datetime.time(14, 40) and _price_sync_date != today:   # 不看 traded_today：伺服器收盤後才啟動也要補抓今日行情，否則晚上不會建當日名單
                 last = db.query("SELECT MAX(date) d FROM daily")[0]["d"]
                 if (last or "") < today:
                     from . import sync
