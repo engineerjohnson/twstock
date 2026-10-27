@@ -77,7 +77,9 @@ def build(out=None):
             _dump(os.path.join(api, f"rankings_{kind}_{ml}.json"), {"items": engine.rankings(kind, 60, ml), "date": d.get("date")})
     _dump(os.path.join(api, "sectors.json"), {"items": engine.sectors(), "date": d.get("date")})
     _dump(os.path.join(api, "backtest.json"), {"report": backtest.get()})
-    _dump(os.path.join(api, "daytrade_close.json"), {"report": db.get_meta("daytrade_close") or {}, "status": {}, "target_date": d.get("date")})
+    # status 帶雲端這次嘗試建名單的結果 (例如「分點資料尚未公布」)，網頁才知道為什麼名單還是前一天的
+    cst = {k: v for k, v in daytrade.state["close"].items() if k in ("step", "error", "date", "built")}; cst["running"] = False
+    _dump(os.path.join(api, "daytrade_close.json"), {"report": db.get_meta("daytrade_close") or {}, "status": cst, "target_date": d.get("date")})
     try: ver = daytrade.verify(20)
     except Exception as e: print("daytrade verify", e); ver = {"days": [], "summary": {}}
     _dump(os.path.join(api, "daytrade_verify.json"), ver)
