@@ -52,6 +52,11 @@ def run(mode="auto"):
             if st is sync.sync_tdcc: db.set_meta("tdcc_bulk_fetched", today)
         except Exception as e:
             print(f"{st.__name__} 失敗: {e}", flush=True); traceback.print_exc()
+    try:
+        from . import daytrade
+        n = daytrade.import_history()
+        if n: print(f"daytrade 名單歷史種子補入 {n} 筆", flush=True)
+    except Exception as e: print("daytrade import_history", e, flush=True)
     d = engine.rebuild()
     if mode == "full":
         data_date = d.get("date")

@@ -55,16 +55,20 @@ def sync_insti(days=INSTI_DAYS):
                 idx = twse.fetch_index_summary(d)
                 if idx: db.set_meta(f"index:{iso(d)}", idx)
             except Exception as e: _log(f"指數 {iso(d)}: {e}")
-        got_any, failed = False, False
+        got, failed = [], False
         for name, fn in (("TWSE", twse.fetch_insti), ("TPEx", tpex.fetch_insti)):
             try: res = fn(d)
             except Exception as e:
                 _log(f"{name} 法人 {iso(d)} 失敗: {e}"); res = None; failed = True
             if res:
                 db.executemany("INSERT OR REPLACE INTO insti(code,date,foreign_net,trust_net,dealer_net,total_net) VALUES(?,?,?,?,?,?)", res)
-                got_any = True
+                got.append(name)
+        got_any = bool(got)
         if got_any:
-            db.mark_fetched("insti", iso(d), "ok")
+            # 證交所 (約 16:00) 與櫃買 (較早) 公布時間不同：只抓到一邊就標 partial，下次同步再補；超過一天仍只有一邊就視為完成
+            complete = len(got) == 2 or d < now.date() - datetime.timedelta(days=1)
+            db.mark_fetched("insti", iso(d), "ok" if complete else "partial")
+            if not complete: _log(f"法人 {iso(d)} 只抓到 {'/'.join(got)}，另一市場尚未公布，下次同步再補")
             for name, fn in (("TWSE", margin.fetch_twse), ("TPEx", margin.fetch_tpex)):
                 try:
                     mr = fn(d)

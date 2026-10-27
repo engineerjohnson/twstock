@@ -567,6 +567,31 @@ def _store_flows(code, date, parsed):
     if rows: db.executemany("INSERT OR REPLACE INTO broker_flow(code,date,broker,buy,sell,net,pct) VALUES(?,?,?,?,?,?,?)", rows)
     db.mark_fetched(f"broker:{code}", date, "ok" if rows else "empty")
 
+SEED_PATH = os.path.join(os.path.dirname(__file__), "seed", "daytrade_history.json")
+
+def export_history(path=SEED_PATH):
+    """把每日名單 / 加權指數 / 臺指期歷史 (meta) 匯出成種子檔，讓雲端版 (每次都是新資料庫) 也能顯示名單驢證。部署前執行。"""
+    out = {}
+    for pre in ("daytrade_close:", "index:", "tx_futures:"):
+        for r in db.query("SELECT key, value FROM meta WHERE key LIKE ?", (pre + "%",)):
+            try: out[r["key"]] = json.loads(r["value"])
+            except Exception: out[r["key"]] = r["value"]
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f: json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
+    return len(out)
+
+def import_history(path=SEED_PATH):
+    """只補資料庫裡沒有的 key (雲端用)。回傳補了幾筆。"""
+    if not os.path.exists(path): return 0
+    try:
+        with open(path, encoding="utf-8") as f: data = json.load(f)
+    except Exception as e: print("import_history", e); return 0
+    have = {r["key"] for r in db.query("SELECT key FROM meta WHERE key LIKE 'daytrade_close:%' OR key LIKE 'index:%' OR key LIKE 'tx_futures:%'")}
+    n = 0
+    for k, v in data.items():
+        if k not in have: db.set_meta(k, v); n += 1
+    return n
+
 def tag_items(items):
     """把當沖收盤判斷標到推薦/技術/籌碼名單上 (dt: verdict/date/on_buy_pct/on_sell_pct/chg)：同在做空名單的股票隔日開高常被倒貨，波段買點宜等拉回。"""
     try:
@@ -594,6 +619,11 @@ def build_close(date=None, force=False):
             rows, summ = broker.fetch_daytrade_stat(d)
             if rows: db.executemany("INSERT OR REPLACE INTO daytrade_stat(code,date,dt_shares,dt_buy,dt_sell,flag) VALUES(?,?,?,?,?,?)", rows)
             if summ: db.set_meta(f"daytrade_summary:{date}", summ)
+        if db.fetched("insti", date) != "ok":   # 法人 (外資買賣超是做空評分因子) 還沒完整入庫 → 先補抓，約 16:00 後證交所才公布
+            try:
+                from . import sync
+                c["step"] = "補抓三大法人"; sync.sync_insti(3)
+            except Exception as e: print("insti", date, e)
         cands = _candidates(date)
         mkt = market_pct(date)
         if mkt is None:   # 法人同步 (約 16:00) 之前指數還沒入庫 → 直接向證交所補抓，否則做空規則無法判斷逆勢
