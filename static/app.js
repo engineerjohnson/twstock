@@ -43,6 +43,7 @@ async function staticApi(p, opt) {
   if (path === '/api/quotes') return { quotes: {}, trading: false };
   if (path === '/api/daytrade/live') return { items: [], total: 0, trading: false, static: true };
   if (path === '/api/daytrade/close') { if (method === 'POST') return { started: false }; try { return await sjson('daytrade_close.json'); } catch (e) { return { report: {}, status: {} }; } }
+  if (path === '/api/daytrade/verify') { try { return await sjson('daytrade_verify.json'); } catch (e) { return { days: [], summary: {} }; } }
   if (path.startsWith('/api/daytrade/')) return { bars: [] };
   if (path === '/api/news') {
     const all = (await sjson('news.json')); const cat = q.get('cat'), sent = q.get('sent'), tag = q.get('tag'), kw = (q.get('q') || '').trim(), lim = +(q.get('limit') || 200);

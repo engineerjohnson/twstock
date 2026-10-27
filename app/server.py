@@ -132,17 +132,7 @@ def news(cat: str = "", sent: str = "", q: str = "", tag: str = "", limit: int =
     return {"items": rows, "updated": db.get_meta("news_updated")}
 
 def _dt_tag(items):
-    """把當沖收盤判斷 (隔日沖券商) 標到推薦/技術/籌碼名單上：同一檔股票若同時在做空名單，隔日開高常被倒貨，波段買點宜等拉回。"""
-    try:
-        rep = db.get_meta("daytrade_close") or {}
-        tag = {}
-        for kind in ("short", "long"):
-            for x in rep.get(kind) or []:
-                tag[x["code"]] = {"verdict": kind, "date": rep.get("date"), "on_buy_pct": x.get("on_buy_pct"), "on_sell_pct": x.get("on_sell_pct"), "chg": x.get("chg")}
-        for it in items or []:
-            if it.get("code") in tag: it["dt"] = tag[it["code"]]
-    except Exception: pass
-    return items
+    return daytrade.tag_items(items)
 
 @app.get("/api/recommend")
 def recommend(limit: int = 40, min_lots: int = 1000):

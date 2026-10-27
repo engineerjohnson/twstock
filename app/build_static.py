@@ -5,6 +5,7 @@ import os, sys, json, datetime, shutil, time
 from . import db
 from .config import BASE_DIR, STATIC_DIR, REC_MIN_DAY_LOTS
 from .analysis import engine, market, ai, backtest, technical
+from . import daytrade
 from .analysis.technical import SIGNAL_LABELS
 
 MIN_LOTS = [0, 500, 1000, 2000, 5000, 10000]
@@ -63,20 +64,23 @@ def build(out=None):
     for ml in MIN_LOTS:
         _dump(os.path.join(api, f"overview_{ml}.json"), {"impact": imp, "tw": tw, "intl": {k: v for k, v in intl.items() if k != "_updated"},
               "bull_news": [r for r in strong if r["sentiment"] > 0][:8], "bear_news": [r for r in strong if r["sentiment"] < 0][:8],
-              "latest_news": news[:12], "ai": rep, "recommend": engine.recommend(10, ml),
+              "latest_news": news[:12], "ai": rep, "recommend": daytrade.tag_items(engine.recommend(10, ml)),
               "foreign_sudden": engine.chips_list("foreign_sudden", 8, ml), "trust_sudden": engine.chips_list("trust_sudden", 8, ml), "data_date": d.get("date")})
-        _dump(os.path.join(api, f"recommend_{ml}.json"), {"items": engine.recommend(50, ml), "date": d.get("date"), "built": d.get("built"), "min_day_lots": REC_MIN_DAY_LOTS})
+        _dump(os.path.join(api, f"recommend_{ml}.json"), {"items": daytrade.tag_items(engine.recommend(50, ml)), "date": d.get("date"), "built": d.get("built"), "min_day_lots": REC_MIN_DAY_LOTS})
         for sig in [""] + list(SIGNAL_LABELS):
-            _dump(os.path.join(api, f"technical_{sig or 'all'}_{ml}.json"), {"items": engine.technical_list(sig or None, 100, ml), "date": d.get("date"),
+            _dump(os.path.join(api, f"technical_{sig or 'all'}_{ml}.json"), {"items": daytrade.tag_items(engine.technical_list(sig or None, 100, ml)), "date": d.get("date"),
                                                                              "factors": d.get("factors", {}), "labels": SIGNAL_LABELS, "min_day_lots": REC_MIN_DAY_LOTS})
         for kind in CHIP_KINDS:
-            _dump(os.path.join(api, f"chips_{kind}_{ml}.json"), {"items": engine.chips_list(kind, 80, ml), "date": d.get("date"), "insti_date": d.get("insti_date"),
+            _dump(os.path.join(api, f"chips_{kind}_{ml}.json"), {"items": daytrade.tag_items(engine.chips_list(kind, 80, ml)), "date": d.get("date"), "insti_date": d.get("insti_date"),
                                                                   "tdcc_date": db.get_meta("tdcc_bulk_date")})
         for kind in RANK_KINDS:
             _dump(os.path.join(api, f"rankings_{kind}_{ml}.json"), {"items": engine.rankings(kind, 60, ml), "date": d.get("date")})
     _dump(os.path.join(api, "sectors.json"), {"items": engine.sectors(), "date": d.get("date")})
     _dump(os.path.join(api, "backtest.json"), {"report": backtest.get()})
     _dump(os.path.join(api, "daytrade_close.json"), {"report": db.get_meta("daytrade_close") or {}, "status": {}, "target_date": d.get("date")})
+    try: ver = daytrade.verify(20)
+    except Exception as e: print("daytrade verify", e); ver = {"days": [], "summary": {}}
+    _dump(os.path.join(api, "daytrade_verify.json"), ver)
     _dump(os.path.join(api, "news.json"), {"items": news, "updated": db.get_meta("news_updated")})
     _dump(os.path.join(api, "ai.json"), {"report": rep, "running": False, "error": None, "mode": "static", "started": None})
     # stocks list (search) + per-stock detail

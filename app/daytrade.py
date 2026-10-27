@@ -567,6 +567,19 @@ def _store_flows(code, date, parsed):
     if rows: db.executemany("INSERT OR REPLACE INTO broker_flow(code,date,broker,buy,sell,net,pct) VALUES(?,?,?,?,?,?,?)", rows)
     db.mark_fetched(f"broker:{code}", date, "ok" if rows else "empty")
 
+def tag_items(items):
+    """把當沖收盤判斷標到推薦/技術/籌碼名單上 (dt: verdict/date/on_buy_pct/on_sell_pct/chg)：同在做空名單的股票隔日開高常被倒貨，波段買點宜等拉回。"""
+    try:
+        rep = db.get_meta("daytrade_close") or {}
+        tag = {}
+        for kind in ("short", "long"):
+            for x in rep.get(kind) or []:
+                tag[x["code"]] = {"verdict": kind, "date": rep.get("date"), "on_buy_pct": x.get("on_buy_pct"), "on_sell_pct": x.get("on_sell_pct"), "chg": x.get("chg")}
+        for it in items or []:
+            if it.get("code") in tag: it["dt"] = tag[it["code"]]
+    except Exception: pass
+    return items
+
 def build_close(date=None, force=False):
     """收盤後分析: 抓當沖統計 + 候選股分點 → 判斷隔日偏多/偏空，存到 meta daytrade_close。回傳 True 表示完成。"""
     c = state["close"]

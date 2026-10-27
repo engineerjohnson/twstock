@@ -63,6 +63,15 @@ def run(mode="auto"):
                 db.set_meta("tdcc_candidates_for", data_date)
                 engine.rebuild()
             except Exception as e: print("tdcc candidates", e, flush=True)
+        # 當沖收盤名單：抓富邦分點 (約 1~2 分鐘)，分點通常 16:00~18:00 才公布，沒公布就下一次排程再試
+        if (db.get_meta("daytrade_close") or {}).get("date") != data_date:
+            try:
+                from . import daytrade
+                try: daytrade.sync_futures_history(10)
+                except Exception as e: print("taifex history", e, flush=True)
+                ok = daytrade.build_close(data_date)
+                print("daytrade build_close", data_date, ok, daytrade.state["close"].get("step"), flush=True)
+            except Exception as e: print("daytrade", e, flush=True); traceback.print_exc()
         if ((backtest.get() or {}).get("dates") or [None, None])[1] != data_date:   # 行情有新日期才重算回測
             try: backtest.run(); engine.rebuild()
             except Exception as e: print("backtest", e, flush=True)
