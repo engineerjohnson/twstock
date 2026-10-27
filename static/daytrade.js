@@ -149,6 +149,10 @@ async function loadDaytradeClose() {
     $('#dtShort').innerHTML = (rep.short || []).length ? DT_CLOSE_HEAD('short') + rep.short.map(x => dtCloseRow(x, 'short')).join('') : empty();
     $('#dtWatch').innerHTML = (rep.watch || []).length ? DT_CLOSE_HEAD('short') + rep.watch.map(x => dtCloseRow(x, x.on_buy_pct >= x.on_sell_pct ? 'short' : 'long')).join('') : empty();
     bindExpand('#dtLong'); bindExpand('#dtShort'); bindExpand('#dtWatch');
+    const rk = rep.on_rank || [];
+    $('#dtOnRank').innerHTML = rk.length ? `<tr><th>#</th><th>股票</th><th class="num">隔日沖淨買超</th><th class="num" title="淨買超占當日成交量">占量</th><th class="num">當日漲跌</th><th class="num">成交量</th><th>主要隔日沖分點 (張)</th></tr>` +
+      rk.map((x, i) => `<tr class="row"><td class="muted">${i + 1}</td><td>${codeLink(x.code, x.name)}</td><td class="num"><b>${fmt(x.net, 0)}</b> 張</td><td class="num">${x.pct !== null && x.pct !== undefined ? x.pct + '%' : '-'}</td><td class="num ${x.chg > 0 ? 'up' : x.chg < 0 ? 'dn' : ''}">${pct(x.chg)}</td><td class="num">${fmt(x.lots, 0)}</td><td class="small">${(x.brokers || []).map(b => `${esc(b[0])} ${fmt(b[1], 0)}`).join('、')}</td></tr>`).join('')
+      : `<tr><td class="muted" style="padding:12px">${rep.date ? '此名單尚無排行資料，按「重新計算」後產生' : '尚未計算'}</td></tr>`;
     if (!loadDaytradeClose.verifyAt || Date.now() - loadDaytradeClose.verifyAt > 120000) { loadDaytradeClose.verifyAt = Date.now(); loadDaytradeVerify(); }
     clearTimeout(DT.closeTimer); DT.closeTimer = setTimeout(() => { if (document.querySelector('#tab-daytrade').classList.contains('active')) loadDaytradeClose(); }, st.running ? 3000 : 60000);
   } catch (e) { $('#dtCloseStatus').textContent = '讀取失敗：' + e.message; }

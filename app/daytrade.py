@@ -592,6 +592,33 @@ def import_history(path=SEED_PATH):
         if k not in have: db.set_meta(k, v); n += 1
     return n
 
+PURE_OVERNIGHT = [p for p in OVERNIGHT_BROKERS if p not in ("美林", "摩根大通")]   # 美林 / 摩根大通是外資經紀，大型股的進出不是隔日沖
+
+def rank_from_flows(rows, patterns=PURE_OVERNIGHT, limit=20):
+    """純函式：broker_flow 列 (code,name,broker,net,close,prev,lots) → 隔日沖券商合計淨買超排行 (只算真正的隔日沖分點)。"""
+    agg = {}
+    for r in rows:
+        if not broker.is_overnight(r["broker"], patterns): continue
+        a = agg.setdefault(r["code"], {"code": r["code"], "name": r["name"], "net": 0.0, "buy": 0.0, "sell": 0.0, "lots": r.get("lots") or 0, "close": r.get("close"),
+                                       "chg": round((r["close"] / r["prev"] - 1) * 100, 2) if r.get("prev") and r.get("close") else None, "brokers": []})
+        a["net"] += r.get("net") or 0; a["buy"] += r.get("buy") or 0; a["sell"] += r.get("sell") or 0
+        if (r.get("net") or 0) > 0: a["brokers"].append([r["broker"], round(r["net"])])
+    out = []
+    for a in sorted(agg.values(), key=lambda x: -x["net"]):
+        if a["net"] <= 0: break
+        a["brokers"] = sorted(a["brokers"], key=lambda x: -x[1])[:3]
+        a["net"] = round(a["net"]); a["buy"] = round(a["buy"]); a["sell"] = round(a["sell"])
+        a["pct"] = round(a["net"] / a["lots"] * 100, 2) if a["lots"] else None
+        out.append(a)
+        if len(out) >= limit: break
+    return out
+
+def overnight_rank(date, limit=20):
+    """某日 (已抓分點的候選股) 隔日沖券商淨買超最多的股票。回測顯示它對隔日方向沒有預測力，但能看出隔日沖部位集中在哪 (隔天開盤會有他們的賣壓)。"""
+    rows = db.query("SELECT f.code, s.name, f.broker, f.buy, f.sell, f.net, d.close, d.volume/1000.0 lots, p.close prev FROM broker_flow f JOIN stocks s ON s.code=f.code "
+                    "JOIN daily d ON d.code=f.code AND d.date=f.date LEFT JOIN daily p ON p.code=f.code AND p.date=(SELECT MAX(date) FROM daily WHERE date<f.date) WHERE f.date=?", (date,))
+    return rank_from_flows([dict(r) for r in rows], limit=limit)
+
 def tag_items(items):
     """把當沖收盤判斷標到推薦/技術/籌碼名單上 (dt: verdict/date/on_buy_pct/on_sell_pct/chg)：同在做空名單的股票隔日開高常被倒貨，波段買點宜等拉回。"""
     try:
@@ -657,7 +684,7 @@ def build_close(date=None, force=False):
         short = sorted([x for x in results if x["verdict"] == "short"], key=lambda x: -x["score"])
         watch = sorted([x for x in results if x["verdict"] == "watch" and x["reasons"]], key=lambda x: -(x["on_buy_pct"] + x["on_sell_pct"]))
         out = {"date": date, "built": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"), "n_candidates": len(results), "market_pct": mkt, "long": long_[:40], "short": short[:40],
-               "watch": watch[:40], "summary": db.get_meta(f"daytrade_summary:{date}"), "brokers": OVERNIGHT_BROKERS}
+               "watch": watch[:40], "summary": db.get_meta(f"daytrade_summary:{date}"), "brokers": OVERNIGHT_BROKERS, "on_rank": overnight_rank(date)}
         db.set_meta("daytrade_close", out)
         db.set_meta(f"daytrade_close:{date}", {k: out[k] for k in ("date", "built", "long", "short")})
         c.update(step="完成", date=date, built=out["built"], running=False)
