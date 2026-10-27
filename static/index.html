@@ -104,6 +104,12 @@
       <span class="sp"></span>
       <a class="btn only-server" id="expRec" href="/api/export?what=recommend" download>⬇ 匯出 CSV</a>
     </div>
+    <div class="card" style="margin-bottom:10px">
+      <h3 style="margin:0 0 6px" title="族群成交金額占大盤比重相對 20 日平均的增幅排名；連 2 日以上排前 5 視為資金持續流入">💰 資金流向：熱門族群裡還在低點的股票 <span class="muted small">回測 7/20～10/22：族群連 2 日資金流入前 5 + 個股 20 日乖離 ≤0 → 5 日 63%、10 日 65% (基準 47% / 51%)；同族群已漲 (乖離 >5%) 只有 49% / 40%。注意樣本集中在 9 月多頭段，10 月弱勢月沒有優勢。</span></h3>
+      <div id="flowInds" style="margin-bottom:6px"></div>
+      <p class="muted small" id="flowMeta" style="margin:0 0 6px"></p>
+      <div class="tscroll"><table class="tbl wide" id="flowTable"></table></div>
+    </div>
     <div class="legendbox" data-legend></div>
     <div class="tscroll"><table class="tbl wide" id="recTable"></table></div>
   </section>

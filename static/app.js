@@ -37,6 +37,7 @@ async function staticApi(p, opt) {
   if (path === '/api/chips') return sjson(`chips_${q.get('kind') || 'foreign_sudden'}_${ml}.json`);
   if (path === '/api/rankings') return sjson(`rankings_${q.get('kind') || 'gainers'}_${ml}.json`);
   if (path === '/api/sectors') return sjson('sectors.json');
+  if (path === '/api/flow') return sjson(`flow_${ml}.json`);
   if (path === '/api/backtest') return sjson('backtest.json');
   if (path === '/api/ai') return method === 'POST' ? { result: 'unavailable' } : sjson('ai.json');
   if (path === '/api/tdcc_candidates') return { started: false };
@@ -344,7 +345,20 @@ const NCOL = 18;
 function bindExpand(sel) { document.querySelectorAll(sel + ' tr.row').forEach(tr => tr.onclick = e => { if (e.target.closest('.code,.star,a,input,button')) return; tr.classList.toggle('open'); }); }
 
 /* ---------- recommend ---------- */
+async function loadFlow() {
+  try {
+    const d = await api('/api/flow?limit=40&min_lots=' + minLots());
+    const pp = v => (v > 0 ? '+' : '') + v;
+    const inds = (d.industries || []).slice(0, 10).map(x => `<span class="badge ${x.streak >= 2 && x.rank <= 5 ? 'bull' : ''}" title="成交金額占大盤 ${x.share}% (較 20 日均 ${pp(x.share_d)} 個百分點)，金額為 20 日均的 ${x.ratio} 倍，連續 ${x.streak} 日排名前 5">#${x.rank} ${esc(x.industry)} ${pp(x.share_d)}pp${x.streak >= 2 ? ' 🔥連' + x.streak + '日' : ''}</span>`).join(' ');
+    $('#flowInds').innerHTML = inds || '<span class="muted">尚無資料</span>';
+    $('#flowMeta').textContent = d.hot && d.hot.length ? `資料日 ${d.date}，熱門族群 (連 2 日以上資金流入前 5)：${d.hot.join('、')}；族群內月線下的個股 ${d.items.length} 檔` : `資料日 ${d.date}，今天沒有連續 2 日資金流入前 5 的族群，名單為空`;
+    $('#flowTable').innerHTML = d.items.length ? HEAD + d.items.map(r => stockRow(r) + `<tr class="expand"><td colspan="${NCOL}"><b>資金流向：</b><span class="badge bull">${esc(r.flow.industry)} 資金流入排名 #${r.flow.rank}，連 ${r.flow.streak} 日</span> <span class="badge">族群成交占比 ${r.flow.share}% (較 20 日均 ${pp(r.flow.share_d)}pp)</span> <span class="badge">20 日乖離 ${fmt(r.bias20, 1)}%${r.bias20 <= -5 ? ' (回測乖離 <-5 更佳 67%)' : ''}</span> ${r.big ? '<span class="badge bull">當日 ≥1 萬張 (回測 79%/71%)</span>' : '<span class="badge risk">當日量未達 1 萬張</span>'}</td></tr>`).join('') : '';
+    bindExpand('#flowTable');
+  } catch (e) { $('#flowMeta').textContent = '讀取失敗：' + e.message; }
+}
+
 async function loadRecommend() {
+  loadFlow();
   const d = await api('/api/recommend?limit=50&min_lots=' + minLots());
   $('#recBuilt').textContent = ` 資料日 ${d.date}，計算於 ${d.built}，共 ${d.items.length} 檔。僅列前一交易日成交量 ≥ ${fmt(d.min_day_lots || 10000, 0)} 張者 (點表頭排序：▼大→小 / ▲小→大 / 再點取消；Shift+點或開「多欄排序」可加次要欄位)`;
   $('#expRec').href = '/api/export?what=recommend&min_lots=' + minLots();

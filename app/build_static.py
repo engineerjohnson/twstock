@@ -66,6 +66,7 @@ def build(out=None):
               "bull_news": [r for r in strong if r["sentiment"] > 0][:8], "bear_news": [r for r in strong if r["sentiment"] < 0][:8],
               "latest_news": news[:12], "ai": rep, "recommend": daytrade.tag_items(engine.recommend(10, ml)),
               "foreign_sudden": engine.chips_list("foreign_sudden", 8, ml), "trust_sudden": engine.chips_list("trust_sudden", 8, ml), "data_date": d.get("date")})
+        _dump(os.path.join(api, f"flow_{ml}.json"), engine.flow_list(40, ml))
         _dump(os.path.join(api, f"recommend_{ml}.json"), {"items": daytrade.tag_items(engine.recommend(50, ml)), "date": d.get("date"), "built": d.get("built"), "min_day_lots": REC_MIN_DAY_LOTS})
         for sig in [""] + list(SIGNAL_LABELS):
             _dump(os.path.join(api, f"technical_{sig or 'all'}_{ml}.json"), {"items": daytrade.tag_items(engine.technical_list(sig or None, 100, ml)), "date": d.get("date"),

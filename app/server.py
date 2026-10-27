@@ -138,6 +138,10 @@ def _dt_tag(items):
 def recommend(limit: int = 40, min_lots: int = 1000):
     return {"items": _dt_tag(engine.recommend(limit, min_lots)), "date": engine.get().get("date"), "built": engine.get().get("built"), "min_day_lots": REC_MIN_DAY_LOTS}
 
+@app.get("/api/flow")
+def flow_api(limit: int = 40, min_lots: int = 1000):
+    return engine.flow_list(limit, min_lots)
+
 @app.get("/api/technical")
 def technical(signal: str = "", limit: int = 80, min_lots: int = 1000):
     return {"items": _dt_tag(engine.technical_list(signal or None, limit, min_lots)), "factors": engine.get().get("factors", {}),

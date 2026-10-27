@@ -4,7 +4,7 @@ from collections import defaultdict
 import numpy as np
 from .. import db
 from ..config import REC_MIN_DAY_LOTS
-from . import technical, chips, newsrules
+from . import technical, chips, newsrules, flow
 
 _cache = {"built": 0, "data": None}
 
@@ -124,8 +124,22 @@ def rebuild():
             s["chips"]["signals"] += tsig
             s["chips"]["chip_score"] = max(0, min(100, s["chips"]["chip_score"] + sum(x["w"] for x in tsig)))
             s["total"] = round(s["total"] + 0.30 * sum(x["w"] for x in tsig), 1)
+    # 資金流向：族群成交金額占比排名 (近 45 日) 與熱門族群低點股
+    try:
+        recent = dates[-45:]
+        amt = flow.industry_amounts((r for r in daily if r["date"] >= recent[0]), {c: s.get("industry") for c, s in stocks.items()})
+        fr = flow.rank_days(amt)
+        today_rec = fr.get(last_date) or {}
+        inds = sorted(today_rec.items(), key=lambda kv: kv[1]["rank"])
+        sector_flow = {"date": last_date, "industries": [{"industry": g, **v} for g, v in inds],
+                       "hot": flow.hot_industries(today_rec),
+                       "picks": [s["code"] for s in flow.pick(result.values(), today_rec)]}
+        if sector_flow["picks"] and not db.get_meta(f"flow_picks:{last_date}"):   # 存每日名單供日後驗證 (5 / 10 日)
+            db.set_meta(f"flow_picks:{last_date}", {"date": last_date, "hot": sector_flow["hot"], "items": [{"code": c, "close": result[c]["close"], "bias20": result[c]["bias20"], "lots": result[c]["lots"], "industry": result[c]["industry"]} for c in sector_flow["picks"]]})
+    except Exception as e:
+        print("sector_flow", e); sector_flow = {"date": last_date, "industries": [], "hot": [], "picks": []}
     insti_date = max((r["date"] for r in insti), default=None)
-    data = {"date": last_date, "insti_date": insti_date, "dates": dates[-60:], "stocks": result, "built": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    data = {"date": last_date, "sector_flow": sector_flow, "insti_date": insti_date, "dates": dates[-60:], "stocks": result, "built": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "elapsed": round(time.time() - t0, 1), "factors": factors}
     _cache.update(built=time.time(), data=data)
     print(f"engine.rebuild: {len(result)} stocks in {data['elapsed']}s", flush=True)
@@ -163,6 +177,17 @@ def recommend(limit=40, min_lots=1000):
         out.append({**_brief(s), "reasons": reasons, "risks": s["tech"]["notes"] + [x["label"] for x in (s["chips"]["signals"] if s["chips"] else []) if x["w"] < 0]})
         if len(out) >= limit: break
     return out
+
+def flow_list(limit=40, min_lots=1000):
+    """資金流向名單：連 2 日資金流入前 5 的族群中，20 日乖離 ≤0 的個股 (依族群排名、乖離)。"""
+    d = get(); sf = d.get("sector_flow") or {}
+    today_rec = {x["industry"]: x for x in sf.get("industries") or []}
+    out = []
+    for s in flow.pick(d["stocks"].values(), today_rec):
+        if not liquid(s, min_lots): continue
+        out.append({**_brief(s), "flow": s["flow"], "big": day_liquid(s)})
+        if len(out) >= limit: break
+    return {"date": d.get("date"), "built": d.get("built"), "industries": (sf.get("industries") or [])[:12], "hot": sf.get("hot") or [], "items": out}
 
 def _brief(s):
     return {"code": s["code"], "name": s["name"], "market": s["market"], "industry": s["industry"], "close": s["close"], "chg": s["chg"],
