@@ -3,7 +3,7 @@ import json, datetime, threading, time
 from fastapi import FastAPI, Query
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from . import db, sync
+from . import db, sync, daytrade
 from .config import STATIC_DIR, REC_MIN_DAY_LOTS
 from .analysis import engine, market, ai, newsrules, backtest
 from .analysis import technical as techmod
@@ -58,6 +58,7 @@ def _startup():
             except Exception as e: print("rebuild", e)
             if not last or (datetime.datetime.now() - datetime.datetime.strptime(last, "%Y-%m-%d %H:%M")).total_seconds() > 1800:
                 sync.start("all")
+        if not os.environ.get("DAYTRADE_DISABLE"): daytrade.start()
     threading.Thread(target=boot, daemon=True).start()
 
 @app.get("/")
@@ -130,18 +131,31 @@ def news(cat: str = "", sent: str = "", q: str = "", tag: str = "", limit: int =
         r["stock_names"] = [{"code": c, "name": names.get(c, c)} for c in r["stocks"]]
     return {"items": rows, "updated": db.get_meta("news_updated")}
 
+def _dt_tag(items):
+    """把當沖收盤判斷 (隔日沖券商) 標到推薦/技術/籌碼名單上：同一檔股票若同時在做空名單，隔日開高常被倒貨，波段買點宜等拉回。"""
+    try:
+        rep = db.get_meta("daytrade_close") or {}
+        tag = {}
+        for kind in ("short", "long"):
+            for x in rep.get(kind) or []:
+                tag[x["code"]] = {"verdict": kind, "date": rep.get("date"), "on_buy_pct": x.get("on_buy_pct"), "on_sell_pct": x.get("on_sell_pct"), "chg": x.get("chg")}
+        for it in items or []:
+            if it.get("code") in tag: it["dt"] = tag[it["code"]]
+    except Exception: pass
+    return items
+
 @app.get("/api/recommend")
 def recommend(limit: int = 40, min_lots: int = 1000):
-    return {"items": engine.recommend(limit, min_lots), "date": engine.get().get("date"), "built": engine.get().get("built"), "min_day_lots": REC_MIN_DAY_LOTS}
+    return {"items": _dt_tag(engine.recommend(limit, min_lots)), "date": engine.get().get("date"), "built": engine.get().get("built"), "min_day_lots": REC_MIN_DAY_LOTS}
 
 @app.get("/api/technical")
 def technical(signal: str = "", limit: int = 80, min_lots: int = 1000):
-    return {"items": engine.technical_list(signal or None, limit, min_lots), "factors": engine.get().get("factors", {}),
+    return {"items": _dt_tag(engine.technical_list(signal or None, limit, min_lots)), "factors": engine.get().get("factors", {}),
             "labels": techmod.SIGNAL_LABELS, "date": engine.get().get("date"), "min_day_lots": REC_MIN_DAY_LOTS}
 
 @app.get("/api/chips")
 def chips(kind: str = "foreign_sudden", limit: int = 60, min_lots: int = 0):
-    return {"items": engine.chips_list(kind, limit, min_lots), "date": engine.get().get("date"), "insti_date": engine.get().get("insti_date"),
+    return {"items": _dt_tag(engine.chips_list(kind, limit, min_lots)), "date": engine.get().get("date"), "insti_date": engine.get().get("insti_date"),
             "tdcc_date": db.get_meta("tdcc_bulk_date")}
 
 @app.get("/api/stock/{code}")
@@ -248,6 +262,34 @@ def watchlist_add(payload: dict = Body(...)):
 def watchlist_del(code: str):
     db.executemany("DELETE FROM watchlist WHERE code=?", [(code,)])
     return {"ok": True}
+
+@app.get("/api/daytrade/live")
+def daytrade_live(limit: int = 100, sort: str = "heat", direction: str = "", q: str = "", min_lots: int = 10000):
+    """當沖雷達 (盤中每 5 秒更新): 振幅 / 時間量比 / 內外盤 / 1 分量 / VWAP / 五檔掛單差。min_lots: 成交張數門檻 (前一日或今日)。"""
+    return daytrade.snapshot(min(max(limit, 1), 300), sort, direction, q.strip(), max(min_lots, 0))
+
+@app.get("/api/daytrade/bars/{code}")
+def daytrade_bars(code: str):
+    d = daytrade.bars(code)
+    return d if d else JSONResponse({"error": "not in pool"}, status_code=404)
+
+@app.get("/api/daytrade/close")
+def daytrade_close():
+    """收盤後: 以隔日沖券商分點判斷隔日偏多 / 偏空候選。"""
+    return daytrade.close_report()
+
+@app.post("/api/daytrade/close")
+def daytrade_close_build(force: int = 0):
+    return {"started": daytrade.start_close_build(bool(force)), "status": daytrade.state["close"]}
+
+@app.get("/api/daytrade/verify")
+def daytrade_verify(days: int = 20):
+    """名單驗證: 每日做多/做空名單 vs 隔一交易日實際走勢 (命中率、平均開盤→收盤幅度)。"""
+    return daytrade.verify(min(max(days, 1), 60))
+
+@app.get("/api/daytrade/status")
+def daytrade_status():
+    return {k: v for k, v in daytrade.state.items()}
 
 @app.get("/api/quotes")
 def quotes(codes: str = ""):

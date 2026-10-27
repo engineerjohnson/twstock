@@ -31,6 +31,11 @@ CREATE TABLE IF NOT EXISTS margin(code TEXT, date TEXT, fin_balance REAL, fin_ch
 CREATE INDEX IF NOT EXISTS idx_margin_date ON margin(date);
 CREATE TABLE IF NOT EXISTS watchlist(code TEXT PRIMARY KEY, added TEXT, note TEXT, alert_above REAL, alert_below REAL);
 CREATE TABLE IF NOT EXISTS fetch_log(kind TEXT, date TEXT, status TEXT, PRIMARY KEY(kind,date));
+CREATE TABLE IF NOT EXISTS broker_flow(code TEXT, date TEXT, broker TEXT, buy REAL, sell REAL, net REAL, pct REAL,
+    PRIMARY KEY(code,date,broker));
+CREATE INDEX IF NOT EXISTS idx_broker_date ON broker_flow(date);
+CREATE TABLE IF NOT EXISTS daytrade_stat(code TEXT, date TEXT, dt_shares REAL, dt_buy REAL, dt_sell REAL, flag TEXT,
+    PRIMARY KEY(code,date));
 """
 
 def init():

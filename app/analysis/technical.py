@@ -115,6 +115,7 @@ def signals_at(ind, i):
     if chg >= 9.5: penalty += 15; notes.append("已漲停,追高風險")
     elif chg >= 7: penalty += 6; notes.append("單日漲幅已大")
     if not _nan(r[i]) and r[i] > 80: penalty += 8; notes.append("RSI過熱")
+    if chg >= 5 and vr is not None and vr >= 3: penalty += 10; notes.append(f"爆量大漲(量{vr:.1f}倍)，回測隔日/5日偏弱")
     if not _nan(ma60[i]) and c[i] < ma60[i] and not any(s[0] == "ma60_up" for s in sig): penalty += 5
     score = max(0, min(100, raw - penalty))
     trend = "多頭" if aligned else ("空頭" if (not _nan(ma20[i]) and ma5[i] < ma10[i] < ma20[i]) else "盤整")

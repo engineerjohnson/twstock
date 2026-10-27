@@ -50,6 +50,11 @@ def sync_insti(days=INSTI_DAYS):
     now = datetime.datetime.now()
     _set("下載三大法人", 0, len(todo))
     for i, d in enumerate(todo):
+        if not db.get_meta(f"index:{iso(d)}"):
+            try:
+                idx = twse.fetch_index_summary(d)
+                if idx: db.set_meta(f"index:{iso(d)}", idx)
+            except Exception as e: _log(f"指數 {iso(d)}: {e}")
         got_any, failed = False, False
         for name, fn in (("TWSE", twse.fetch_insti), ("TPEx", tpex.fetch_insti)):
             try: res = fn(d)
@@ -69,10 +74,6 @@ def sync_insti(days=INSTI_DAYS):
                 tot = twse.fetch_insti_total(d)
                 if tot: db.set_meta(f"insti_total:{iso(d)}", tot)
             except Exception as e: _log(f"法人合計 {iso(d)}: {e}")
-            try:
-                idx = twse.fetch_index_summary(d)
-                if idx: db.set_meta(f"index:{iso(d)}", idx)
-            except Exception as e: _log(f"指數 {iso(d)}: {e}")
         elif d < now.date() and not failed:
             db.mark_fetched("insti", iso(d), "holiday")  # 法人資料約 16:00 後才公布；當天沒抓到或抓取失敗都不標記
         _set("下載三大法人", i + 1, len(todo))

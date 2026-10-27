@@ -149,3 +149,16 @@ button.small{padding:3px 8px;font-size:12px;font-weight:400}
 .newsfull .item .s.clip::after{content:""}
 .newsfull .item .s.full{cursor:pointer}
 .newsfull .item .s.clip:hover,.newsfull .item .s.full:hover{color:var(--text)}
+
+/* ===== 當沖雷達 ===== */
+.iobar{position:relative;display:flex;width:110px;height:16px;border-radius:4px;overflow:hidden;background:#263241;font-size:11px}
+.iobar .o{background:#c0303a}.iobar .i{background:#1f8f55}
+.iobar span{position:absolute;left:0;right:0;top:0;text-align:center;line-height:16px;color:#fff;text-shadow:0 0 2px #000}
+.dt-h{font-size:14px;margin:6px 0}.dt-h.long{color:var(--up)}.dt-h.short{color:var(--dn)}
+.dtx{padding:6px 0}.dtchart{width:100%;height:200px;display:block}.dtxinfo{font-size:12px;margin-top:6px}
+.small{font-size:11px}
+#dtTick .live{font-weight:700}
+:root[data-theme="light"] .iobar{background:#e3e8ef}
+#dtCloseCard .grid2{grid-template-columns:1fr}
+#dtCloseCard .tscroll{overflow:auto}
+#dtCloseCard{overflow:visible}

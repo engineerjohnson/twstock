@@ -41,6 +41,9 @@ async function staticApi(p, opt) {
   if (path === '/api/ai') return method === 'POST' ? { result: 'unavailable' } : sjson('ai.json');
   if (path === '/api/tdcc_candidates') return { started: false };
   if (path === '/api/quotes') return { quotes: {}, trading: false };
+  if (path === '/api/daytrade/live') return { items: [], total: 0, trading: false, static: true };
+  if (path === '/api/daytrade/close') { if (method === 'POST') return { started: false }; try { return await sjson('daytrade_close.json'); } catch (e) { return { report: {}, status: {} }; } }
+  if (path.startsWith('/api/daytrade/')) return { bars: [] };
   if (path === '/api/news') {
     const all = (await sjson('news.json')); const cat = q.get('cat'), sent = q.get('sent'), tag = q.get('tag'), kw = (q.get('q') || '').trim(), lim = +(q.get('limit') || 200);
     const items = all.items.filter(n => (!cat || n.category === cat) && (sent !== 'bull' || n.sentiment > 0) && (sent !== 'bear' || n.sentiment < 0)
@@ -324,8 +327,11 @@ let watchSet = new Set(), winMap = {};  // label -> {win, base}
 async function loadFactors() { try { const d = await api('/api/technical?limit=1'); for (const [id, f] of Object.entries(d.factors || {})) { const lab = d.labels[id]; if (lab) winMap[lab] = f; } } catch (e) { } }
 const sigBadge = (x, cls = 't') => { const key = x.replace(/\(.*$/, ''); const f = winMap[x] || winMap[key]; return `<span class="badge ${cls}" ${f ? `title="歷史回測：出現後 5 日上漲機率 ${f.win}% (全市場基準 ${f.base}%，樣本 ${f.n})"` : ''}>${esc(x)}${f ? `<i class="win ${f.win >= f.base + 3 ? 'g' : f.win < f.base - 3 ? 'b' : ''}">${Math.round(f.win)}%</i>` : ''}</span>`; };
 const star = c => `<span class="star ${watchSet.has(c) ? 'on' : ''}" data-code="${c}" title="加入/移除自選股">${watchSet.has(c) ? '★' : '☆'}</span>`;
+const dtBadge = r => !r.dt ? '' : r.dt.verdict === 'short'
+  ? `<span class="badge bear" title="當沖雷達 ${r.dt.date} 判斷偏空：${r.dt.on_buy_pct ? `隔日沖券商買超占成交量 ${r.dt.on_buy_pct}%，` : '弱勢股賣超集中，'}隔日開高常被倒貨。波段買點等拉回站穩再進，當沖勿追高">⚡當沖偏空 ${r.dt.on_buy_pct ? `隔日沖${r.dt.on_buy_pct}%` : '弱勢'}</span>`
+  : `<span class="badge bull" title="當沖雷達 ${r.dt.date} 判斷偏多：隔日沖券商已倒貨 (賣超占成交量 ${r.dt.on_sell_pct}%) 股價仍守住">⚡當沖偏多</span>`;
 function stockRow(r, extra = '') {
-  const td = r.tdcc && r.tdcc.d_big400 !== undefined ? `<span class="badge ${r.tdcc.d_big400 > 0 ? 'bull' : 'bear'}">大戶週${r.tdcc.d_big400 > 0 ? '+' : ''}${r.tdcc.d_big400}%</span>` : '';
+  const td = (r.tdcc && r.tdcc.d_big400 !== undefined ? `<span class="badge ${r.tdcc.d_big400 > 0 ? 'bull' : 'bear'}">大戶週${r.tdcc.d_big400 > 0 ? '+' : ''}${r.tdcc.d_big400}%</span>` : '') + dtBadge(r);
   return `<tr class="row" data-code="${r.code}"><td>${codeLink(r.code, r.name)}${star(r.code)}<div class="muted">${esc(r.market)} ${esc(r.industry)}</div></td>
     <td class="num" data-live="${r.code}">${fmt(r.close)}</td><td class="num">${pct(r.chg)}</td><td class="num">${fmt(r.lots, 0)}</td><td class="num muted">${fmt(r.avg20_lots, 0)}</td><td class="num">${amt(r.amount)}</td><td class="num">${fmt(r.vol_ratio, 1)}x</td>
     <td>${scoreBadge(r.total)}</td><td class="num">${r.tech_score}</td><td class="num">${r.chip_score}</td><td class="num">${r.fund_score}</td><td class="num">${r.news_score}</td>

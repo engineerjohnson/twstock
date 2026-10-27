@@ -76,6 +76,7 @@ def build(out=None):
             _dump(os.path.join(api, f"rankings_{kind}_{ml}.json"), {"items": engine.rankings(kind, 60, ml), "date": d.get("date")})
     _dump(os.path.join(api, "sectors.json"), {"items": engine.sectors(), "date": d.get("date")})
     _dump(os.path.join(api, "backtest.json"), {"report": backtest.get()})
+    _dump(os.path.join(api, "daytrade_close.json"), {"report": db.get_meta("daytrade_close") or {}, "status": {}, "target_date": d.get("date")})
     _dump(os.path.join(api, "news.json"), {"items": news, "updated": db.get_meta("news_updated")})
     _dump(os.path.join(api, "ai.json"), {"report": rep, "running": False, "error": None, "mode": "static", "started": None})
     # stocks list (search) + per-stock detail

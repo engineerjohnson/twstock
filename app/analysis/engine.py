@@ -87,7 +87,7 @@ def rebuild():
         if factors:  # 依歷史勝率校正技術分數
             tech["tech_score_raw"] = tech["tech_score"]
             adj = sum(x["w"] * factors.get(x["id"], {}).get("factor", 1.0) for x in tech["signals"])
-            tech["tech_score"] = int(max(0, min(100, round(adj - tech.get("penalty", 0)))))
+            tech["tech_score"] = int(max(0, min(100, round(adj)) - tech.get("penalty", 0)))   # 先夾 100 再扣罰分，追高罰分才不會被上限吃掉
             for x in tech["signals"]:
                 f = factors.get(x["id"])
                 if f: x["win5"] = f["win"]; x["base5"] = f["base"]
