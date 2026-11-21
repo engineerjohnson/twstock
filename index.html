@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>台股分析師</title>
+<meta name="theme-color" content="#111820">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.png">
+<link rel="apple-touch-icon" href="icon-512.png">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="extra.css">
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+<header>
+  <div class="brand">📈 台股分析師 <span class="sub" id="dataDate"></span></div>
+  <nav>
+    <button data-tab="overview" class="active">總覽</button>
+    <button data-tab="news">新聞</button>
+    <button data-tab="recommend">推薦股</button>
+    <button data-tab="technical">技術面起漲</button>
+    <button data-tab="chips">籌碼面</button>
+    <button data-tab="rankings">排行/類股</button>
+    <button data-tab="watchlist">自選股 <span id="wlCount" class="pill"></span></button>
+    <button data-tab="daytrade">⚡ 當沖雷達</button>
+    <button data-tab="stock">個股K線</button>
+  </nav>
+  <div class="actions">
+    <select id="minLots" title="流動性門檻：近20日「平均」成交張數 (全市場中位數約270張，≥1000張約前30%)。注意：這與推薦股的「前一日成交量≥1萬張」是兩道不同篩選，設太高會把剛爆量起漲的股票濾掉">
+      <option value="0">不限量</option><option value="500">均量≥500張</option><option value="1000" selected>均量≥1000張</option>
+      <option value="2000">均量≥2000張</option><option value="5000">均量≥5000張</option><option value="10000">均量≥1萬張</option>
+    </select>
+    <input id="quickSearch" placeholder="代號 / 名稱 → 個股" autocomplete="off">
+    <div id="searchBox" class="dropdown hidden"></div>
+    <button id="btnNews" class="primary" title="重新抓取新聞與國際行情">🔄 更新新聞</button>
+    <button id="btnPrices" title="抓取最新行情 / 三大法人 / 融資券 / 基本面 / 集保">📊 更新行情/籌碼</button>
+    <button id="btnAI" class="ai only-server" title="用 Claude 解讀最新新聞與數據">🤖 AI 分析師解讀</button>
+    <button id="btnTheme" class="icon" title="切換深色 / 淺色">🌙</button>
+    <button id="btnMobile" class="only-server" title="手機連線 QR Code">手機連線</button>
+    <span id="cloudNote" class="muted hidden"></span>
+  </div>
+</header>
+<div id="statusBar" class="hidden"><span id="statusText"></span><div class="bar"><div id="statusFill"></div></div></div>
+<div id="liveBar" class="hidden">🟢 盤中即時報價 (約 5 秒延遲) <span id="liveIdx"></span></div>
+
+<main>
+  <!-- 總覽 -->
+  <section id="tab-overview" class="tab active">
+    <div class="grid2">
+      <div class="card">
+        <h2>🌍 國際市場 → 台股影響 <span class="muted" id="intlUpdated"></span><span class="sp"></span><button id="ttsOverview" class="sec small" title="語音播報：國際影響、AI 觀點、利多與利空">🔊 播報重點</button></h2>
+        <div id="impactView" class="impact"></div>
+        <div id="intlCards" class="tiles"></div>
+        <ul id="impactNotes" class="notes"></ul>
+      </div>
+      <div class="card">
+        <h2>🇹🇼 台股大盤 / 三大法人 (億元)</h2>
+        <table class="tbl" id="twTable"></table>
+        <h2 style="margin-top:14px">🤖 AI 分析師觀點 <span class="muted" id="aiMeta"></span></h2>
+        <div id="aiView" class="aiview"><p class="muted">尚未產生。按右上「AI 分析師解讀」，以 Claude 解讀最新新聞與數據（約 1–2 分鐘）。</p></div>
+      </div>
+    </div>
+    <div class="grid3">
+      <div class="card"><h2>🔥 利多消息</h2><ul id="bullNews" class="newslist"></ul></div>
+      <div class="card"><h2>⚠️ 利空消息</h2><ul id="bearNews" class="newslist"></ul></div>
+      <div class="card"><h2>🕒 最新新聞</h2><ul id="latestNews" class="newslist"></ul></div>
+    </div>
+    <div class="grid3">
+      <div class="card"><h2>⭐ 綜合推薦 Top 10</h2><table class="tbl" id="ovRec"></table></div>
+      <div class="card"><h2>🏦 外資突然大買</h2><table class="tbl" id="ovForeign"></table></div>
+      <div class="card"><h2>🏢 投信突然大買</h2><table class="tbl" id="ovTrust"></table></div>
+    </div>
+  </section>
+
+  <!-- 新聞 -->
+  <section id="tab-news" class="tab">
+    <div class="toolbar">
+      <select id="newsCat"><option value="">全部分類</option><option>盤前盤後</option><option>台股</option><option>美股</option><option>國際</option><option>總經</option><option>頭條</option></select>
+      <select id="newsSent"><option value="">利多+利空+中性</option><option value="bull">只看利多</option><option value="bear">只看利空</option></select>
+      <select id="newsTag"><option value="">全部主題</option><option>盤前</option><option>盤後</option><option>訂單/接單</option><option>EPS/獲利</option><option>營收</option><option>法人動向</option><option>AI/半導體</option><option>總經/聯準會</option><option>關稅/地緣</option><option>美股/國際</option><option>法說/展望</option><option>擴產/資本支出</option><option>匯率</option></select>
+      <input id="newsQ" placeholder="關鍵字 / 代號">
+      <button id="newsGo">搜尋</button>
+      <span class="muted" id="newsUpdated"></span>
+    </div>
+    <div class="toolbar ttsbar" id="ttsBar">
+      <button id="ttsPlay" class="primary">🔊 播報全部</button>
+      <button id="ttsPause" class="sec" disabled>⏸ 暫停</button>
+      <button id="ttsPrev" class="sec" disabled>⏮ 上一則</button>
+      <button id="ttsNext" class="sec" disabled>⏭ 下一則</button>
+      <button id="ttsStop" class="sec" disabled>⏹ 停止</button>
+      <select id="ttsMode" title="播報內容"><option value="title">只唸標題</option><option value="summary" selected>標題＋完整摘要</option></select>
+      <select id="ttsSent" title="播報範圍"><option value="">全部新聞</option><option value="bull">只唸利多</option><option value="bear">只唸利空</option><option value="both">利多＋利空</option></select>
+      <label class="small">語速 <input type="range" id="ttsRate" min="0.6" max="1.8" step="0.1" value="1.1" style="width:90px;vertical-align:middle"> <span id="ttsRateV">1.1x</span></label>
+      <span class="muted" id="ttsStatus"></span>
+    </div>
+    <div id="newsList" class="newsfull"></div>
+  </section>
+
+  <!-- 推薦股 -->
+  <section id="tab-recommend" class="tab">
+    <div class="toolbar">
+      <p class="hint" style="margin:0">綜合評分 = 技術面 40% + 籌碼面 30% + 基本面 15% + 新聞面 15%。<b>前一交易日成交量未達 1 萬張的股票不列入推薦</b>（固定門檻）；右上角「均量」下拉選單是另一道「近 20 日平均量」篩選，若設得太高會把麗臺這類剛爆量起漲的股票也濾掉，一般建議維持「均量≥1000張」。點擊列可看詳細理由，點代號開 K 線，★ 加入自選。<span id="recBuilt" class="muted"></span></p>
+      <span class="sp"></span>
+      <a class="btn only-server" id="expRec" href="/api/export?what=recommend" download>⬇ 匯出 CSV</a>
+    </div>
+    <div class="card" style="margin-bottom:10px">
+      <h3 style="margin:0 0 6px" title="族群成交金額占大盤比重相對 20 日平均的增幅排名；連 2 日以上排前 5 視為資金持續流入">💰 資金流向：熱門族群裡還在低點的股票 <span class="muted small">回測 7/20～10/22：族群連 2 日資金流入前 5 + 個股 20 日乖離 ≤0 → 5 日 63%、10 日 65% (基準 47% / 51%)；同族群已漲 (乖離 >5%) 只有 49% / 40%。注意樣本集中在 9 月多頭段，10 月弱勢月沒有優勢。</span></h3>
+      <div id="flowInds" style="margin-bottom:6px"></div>
+      <p class="muted small" id="flowMeta" style="margin:0 0 6px"></p>
+      <div class="tscroll"><table class="tbl wide" id="flowTable"></table></div>
+    </div>
+    <div class="legendbox" data-legend></div>
+    <div class="tscroll"><table class="tbl wide" id="recTable"></table></div>
+  </section>
+
+  <!-- 技術面 -->
+  <section id="tab-technical" class="tab">
+    <div class="toolbar">
+      <label>起漲訊號：</label>
+      <select id="techSignal">
+        <option value="">全部 (依技術分數)</option>
+        <option value="macd_low_cross">MACD 低檔黃金交叉</option><option value="macd_cross">MACD 黃金交叉</option>
+        <option value="osc_positive">OSC 由負翻正</option><option value="osc_turn">MACD 柱狀體翻揚</option>
+        <option value="kd_cross_low">KD 低檔黃金交叉</option><option value="kd_cross">KD 黃金交叉</option>
+        <option value="ma20_break">帶量站上月線</option><option value="ma60_up">站上季線</option>
+        <option value="bull_align_new">均線轉多頭排列</option><option value="break20">突破20日新高</option><option value="break60">突破60日新高</option>
+        <option value="vol_surge">爆量上漲</option><option value="pullback_ma20">回測月線反彈</option><option value="rsi_rebound">RSI 超賣反彈</option>
+        <option value="bb_breakout">布林收斂突破</option>
+      </select>
+      <span class="muted" title="成交量太小的股票訊號不可靠，故一律排除；右上角「均量」下拉選單另外再以近 20 日平均量篩選">前一交易日成交量 ≥ 1 萬張（右上角均量選單另計）</span>
+      <span class="muted" id="techCount"></span>
+      <span class="sp"></span>
+      <button id="btnBacktest" class="sec">📈 訊號勝率回測</button>
+      <a class="btn only-server" id="expTech" href="/api/export?what=technical" download>⬇ 匯出 CSV</a>
+    </div>
+    <div id="backtestBox" class="card hidden"></div>
+    <div class="legendbox" data-legend></div>
+    <div class="tscroll"><table class="tbl wide" id="techTable"></table></div>
+  </section>
+
+  <!-- 籌碼面 -->
+  <section id="tab-chips" class="tab">
+    <div class="toolbar">
+      <select id="chipKind">
+        <option value="any_buy">法人 / 外資 / 大戶 近一日買超 (任一即列出，依買超金額排序)</option>
+        <option value="insti_top">三大法人合計 近一日買超金額排行</option>
+        <option value="foreign_sudden">外資突然大買 (今日買超 ≥ 近5日均量3倍)</option>
+        <option value="trust_sudden">投信突然大買</option>
+        <option value="both_buy">外資 + 投信 同步買超</option>
+        <option value="foreign_streak">外資連續買超 ≥3日</option>
+        <option value="trust_streak">投信連續買超 ≥3日</option>
+        <option value="foreign_top">外資買超金額排行 (今日)</option>
+        <option value="trust_top">投信買超金額排行 (今日)</option>
+        <option value="foreign5">外資近5日買超金額</option>
+        <option value="trust5">投信近5日買超金額</option>
+        <option value="big_up">大戶 (≥400張) 持股週增</option>
+        <option value="fin_drop">融資減少 (籌碼洗清)</option>
+        <option value="short_up">融券大增 (軋空潛力)</option>
+      </select>
+      <button id="btnTdcc" class="only-server" title="向集保查詢候選股最近兩週大戶持股，約 1 分鐘">🔍 更新大戶週變化</button>
+      <span class="muted" id="chipMeta"></span>
+      <span class="sp"></span>
+      <a class="btn only-server" id="expChips" href="/api/export?what=chips" download>⬇ 匯出 CSV</a>
+    </div>
+    <div class="legendbox" data-legend></div>
+    <div class="tscroll"><table class="tbl wide" id="chipTable"></table></div>
+  </section>
+
+  <!-- 排行 / 類股 -->
+  <section id="tab-rankings" class="tab">
+    <div class="card">
+      <h2>🏭 產業類股 漲跌熱力圖 <span class="muted">(成交金額加權漲幅 · 上漲↑/下跌↓家數 · 成交金額；點產業看龍頭股)</span></h2>
+      <div id="sectorMap" class="heat"></div>
+      <details><summary class="muted" style="cursor:pointer">產業明細表 (點此展開)</summary><table class="tbl" id="sectorTable"></table></details>
+    </div>
+    <div class="card">
+      <div class="toolbar">
+        <select id="rankKind">
+          <option value="gainers">漲幅排行</option><option value="losers">跌幅排行</option><option value="volume">成交張數排行</option>
+          <option value="amount">成交金額排行</option><option value="vol_ratio">量比排行 (今日量÷20日均量)</option>
+          <option value="foreign">外資買超金額</option><option value="foreign_sell">外資賣超金額</option><option value="trust">投信買超金額</option>
+          <option value="fin_up">融資增加張數</option>
+        </select>
+        <span class="muted" id="rankMeta"></span>
+        <span class="sp"></span>
+        <a class="btn only-server" id="expRank" href="/api/export?what=rankings&kind=gainers" download>⬇ CSV</a>
+      </div>
+      <div class="tscroll"><table class="tbl wide" id="rankTable"></table></div>
+    </div>
+  </section>
+
+  <!-- 自選股 -->
+  <section id="tab-watchlist" class="tab">
+    <div class="toolbar">
+      <input id="wlInput" placeholder="輸入代號或名稱加入自選股">
+      <button id="wlAdd" class="primary">＋ 加入</button>
+      <span class="muted" id="wlMeta"></span>
+      <span class="sp"></span>
+      <a class="btn only-server" href="/api/export?what=watchlist" download>⬇ 匯出 CSV</a>
+    </div>
+    <p class="hint">盤中每 10 秒更新即時報價；可設定「高於 / 低於」價位提醒，觸發時畫面右下角與瀏覽器通知。點列展開可編輯備註與提醒。</p>
+    <div class="tscroll"><table class="tbl wide" id="wlTable"></table></div>
+  </section>
+
+
+  <!-- 當沖雷達 -->
+  <section id="tab-daytrade" class="tab">
+    <div class="toolbar">
+      <select id="dtSort" title="排序">
+        <option value="heat">熱度 (振幅+量比+漲跌+爆量+內外盤)</option><option value="amp">振幅 大→小</option><option value="pct">漲幅 大→小</option><option value="pct_down">跌幅 大→小</option>
+        <option value="vol_ratio">時間量比 大→小</option><option value="outer">外盤比 (買方主動) 大→小</option><option value="inner">內盤比 (賣方主動) 大→小</option>
+        <option value="net5">近 5 分淨主動買 大→小</option><option value="burst">1 分爆量倍數</option><option value="volume">成交張數</option><option value="amount">成交金額</option><option value="book">五檔掛單差 (買盤厚)</option>
+      </select>
+      <select id="dtDir" title="方向過濾"><option value="">多空全部</option><option value="bull">只看偏多 (價漲+外盤強+站上均價+近高點)</option><option value="bear">只看偏空 (價跌+內盤強+跌破均價+近低點)</option></select>
+      <select id="dtMinLots" title="流動性門檻：前一交易日成交張數或今日累積張數達到此數才列出 (當沖要能即時進出)"><option value="10000" selected>成交 ≥ 1 萬張</option><option value="20000">成交 ≥ 2 萬張</option><option value="5000">成交 ≥ 5 千張</option><option value="0">不限張數</option></select>
+      <select id="dtLimit" title="顯示檔數"><option value="50">前 50 檔</option><option value="100" selected>前 100 檔</option><option value="200">前 200 檔</option></select>
+      <input id="dtQ" placeholder="代號 / 名稱過濾" style="width:130px">
+      <label class="small" title="符合條件時右下角跳通知：振幅≥3% 且 時間量比≥2 且 (外盤比≥60% 或 ≤40%)"><input type="checkbox" id="dtAlert"> 強勢/弱勢警示</label>
+      <span class="muted" id="dtMeta"></span>
+      <span class="sp"></span>
+      <span class="muted small" id="dtTick"></span>
+    </div>
+    <p class="hint">盤中每 <b>5 秒</b> 自動更新 (證交所 MIS 約 5 秒延遲)。<b>只列成交 ≥ 1 萬張的股票</b> (前一交易日或今日累積量達標，確保當沖能即時進出；可在上方調整)，熱度排序也會給成交張數越多的股票加分。<b>外盤</b> = 成交在賣價 (買方主動追價)、<b>內盤</b> = 成交在買價 (賣方主動殺出)；比例由每次輪詢的「成交量增量」依成交價相對前一刻買賣價歸類，是近似值 (程式啟動前的量不計)。
+      <b>時間量比</b> = 目前累積量 ÷ (20 日均量 × 已開盤時間比例)，&gt;2 代表以今天的節奏估算會是平常兩倍以上的量。<b>均價</b> = 當日成交量加權平均價 (VWAP)，價在均價之上偏多。<b>掛單差</b> = (五檔買量 − 五檔賣量) ÷ 總掛單量。
+      點表頭可排序 (成交張數、振幅、漲跌、量比、外盤比、5 分淨買、掛單差，每次刷新都會保持)；點列可展開 1 分 K 與每分鐘內外盤量；<span class="badge bear">昨隔日沖買超</span> 代表前一交易日隔日沖券商大買，今天開高要留意出貨賣壓。</p>
+    <div class="tscroll"><table class="tbl wide" id="dtTable"></table></div>
+
+    <div class="card" id="dtCloseCard">
+      <h2>🌙 收盤後：隔日沖券商判斷 → 隔日 做多 / 做空 候選 <span class="muted" id="dtCloseMeta"></span><span class="sp"></span>
+        <button id="dtCloseRebuild" class="sec small" title="重新抓候選股的券商分點並重算 (本機約 1～2 分鐘；雲端版會觸發 GitHub 更新，約 2～5 分鐘，需設定一次 GitHub Token)">🔄 重新計算</button></h2>
+      <p class="hint">資料：富邦分點進出 (每日收盤後 16:00～18:00 更新) + 證交所/櫃買當沖統計；候選股限當日成交 ≥ 1 萬張。<b>隔日沖券商</b>名單在 <code>app/config.py OVERNIGHT_BROKERS</code> 可自行增減。
+        <b>偏空</b>：(A) 今日大漲且隔日沖分點大買 (合計 ≥1.5% 成交量，或買超第 1 名是隔日沖且遠超第 2 名) → 慣性是隔天開高出貨，開高後量縮、跌破開盤價/均價可做空；(B) 大跌 ≥3% 收在低檔、帶量、賣超前 5 名集中 ≥6% → 弱勢股隔天反彈不過均價續空。
+        <b>做空名單的成因與規則</b>：大盤收漲的日子全市場在追價，當天漲 3～7% 的股票裡面短線籌碼 (當沖、隔日沖、散戶融資) 最多，隔天一開高就有人要賣；漲停或漲幅過大代表需求還沒被滿足 (續強)，5 日已漲 ≥10% 是趨勢股 (續強)，大盤收跌日還能大漲的是真實買盤 (續強)，這三種都不列。全市場 66 日回測：名單 75% (前後半期都是 75%，逐月 70 / 74 / 82%)；隔日個股開高 0～3% 再執行，大盤盤中下跌時 81%、上漲時 65%。<b>所以 80% 以上的關鍵在開盤後：大盤開低 >0.3% 或盤中翻強就不做。</b>期貨 (期交所即時 + 歷史回測 382 檔)：08:45 臺指期開高 >1% 時執行條件命中 86%、期貨開低時只有 62%；夜盤下跌反而較差 (70%，個股仍開高代表相對強)，夜盤平或漲 84%。雷達表頭會顯示夜盤、08:45 開盤跳空與盤中期貨。黑天鵝 (戰爭、重大事件) 當天大盤跳空就會擋掉大部分。<br>
+<b>28 天分點回測結論 (726 檔)</b>：只有「大盤收漲日的大漲股 + 隔日沖券商買超」隔日開高走低有優勢 (命中 63%，大盤漲 ≥0.5% 時 66%，每日前 5 名 68%)；名單日大盤收跌的逆勢大漲股只有 44%，已自動改列觀察。隔日沖買超占比高低、買超第一名是否隔日沖，對命中率沒有差別；漲停股隔日續強機率高 (做空僅 54%) 已扣分。弱勢股續跌 (做空 B) 命中 44%、隔日沖倒貨型做多 38%，回測都沒有優勢，現在只放在觀察區不列建議。<b>執行條件</b>：隔日開高 0～3% 再空 (回測 69～72%)，開高 >3% (54%) 或開低超過 1% (55%) 放棄；大盤前一日漲 ≥1% 時命中 67%。當日上新聞的大漲股隔日出貨機率高 (初步 20 檔 90%)，雷達與名單都會標 📰。<br><b>偏多</b>：(A) 前一日大漲 ≥3% (隔日沖進場日)、今天隔日沖分點大量賣出但股價仍守在高檔、量比 ≥1.2 → 賣壓解除；(B) 大漲收高、買超集中、且主力不是隔日沖 → 隔天續攻機率較高。<span id="dtCloseStatus" class="muted"></span></p>
+      <div class="grid2">
+        <div><h3 class="dt-h long">🔴 隔日偏多 (做多候選)</h3><div class="tscroll"><table class="tbl" id="dtLong"></table></div></div>
+        <div><h3 class="dt-h short">🟢 隔日偏空 (做空候選)</h3><div class="tscroll"><table class="tbl" id="dtShort"></table></div></div>
+      </div>
+      <h3 class="dt-h" style="margin-top:12px" title="只算真正的隔日沖分點 (凱基台北/松山/虎尾、元大土城永寧、富邦建國/嘉義/虎尾、群益大安、統一士林、國票敦北、國泰敦南、康和板橋)，不含美林、摩根大通">⚡ 隔日沖券商買超排行 <span class="muted small">(他們隔天開盤要出貨：開高常見賣壓；回測顯示買超多寡本身不影響隔日方向，請搭配上方做空條件)</span></h3>
+      <div class="tscroll"><table class="tbl" id="dtOnRank"></table></div>
+      <details style="margin-top:8px"><summary class="muted" style="cursor:pointer">其他有隔日沖分點進出的觀察股 (點此展開)</summary><div class="tscroll"><table class="tbl" id="dtWatch"></table></div></details>
+    </div>
+
+    <div class="card" id="dtVerifyCard">
+      <h2>📊 名單驗證：隔天真的有往預期方向走嗎？ <span class="muted" id="dtVerifyMeta"></span></h2>
+      <p class="hint">每天收盤後的做多 / 做空名單都會留存，隔一交易日自動對照實際走勢。<b>命中</b> = 開盤→收盤往預期方向 (做空跌、做多漲)；<b>開→收</b> = 開盤價到收盤價的幅度 (當沖實際能賺到的方向)；<b>最佳</b> = 開盤後順向最大幅度 (做空看最低點、做多看最高點)。隔日還在盤中時用即時價計算，收盤後會改用正式收盤資料。</p>
+      <div id="dtVerifySummary" class="tiles"></div>
+      <div class="tscroll" style="margin-top:10px"><table class="tbl" id="dtVerifyTable"></table></div>
+    </div>
+  </section>
+
+  <!-- 個股 -->
+  <section id="tab-stock" class="tab">
+    <div class="toolbar">
+      <input id="stockInput" placeholder="輸入代號或名稱，如 2330 / 台積電">
+      <button id="stockGo">查詢</button>
+      <span id="stockTitle" class="stitle"></span>
+      <button id="wlToggle" class="sec hidden">☆ 加入自選</button>
+      <span class="sp"></span>
+      <div class="seg" id="period"><button data-p="D" class="on">日線</button><button data-p="W">週線</button></div>
+      <div class="seg" id="overlays">
+        <button data-k="ma" class="on">均線</button><button data-k="bb" class="on">布林</button><button data-k="insti" class="on">法人買賣超</button>
+      </div>
+    </div>
+    <div class="grid-stock">
+      <div class="card charts">
+        <div class="legend" id="chartLegend"></div>
+        <div id="ohlc" class="ohlc"></div>
+        <div id="chartMain"></div>
+        <div id="chartVol"></div>
+        <div id="chartInsti"></div>
+        <div class="legend">MACD (12,26,9) <span class="muted">DIF 向上穿越 MACD = 黃金交叉；柱狀體 (OSC) 由綠轉紅 = 動能轉強</span></div>
+        <div id="chartMacd"></div>
+        <div class="legend">KD (9,3,3) / RSI(14) <span class="muted">K 由下往上穿過 D 且 &lt;20~40 = 低檔黃金交叉；RSI &gt;80 過熱、&lt;20 超賣</span></div>
+        <div id="chartKd"></div>
+      </div>
+      <div class="card side">
+        <div id="stockInfo"></div>
+      </div>
+    </div>
+    <div class="grid3">
+      <div class="card"><h2>三大法人近 20 日 (張)</h2><table class="tbl" id="stockInsti"></table></div>
+      <div class="card"><h2>融資融券近 20 日 (張)</h2><table class="tbl" id="stockMargin"></table></div>
+      <div class="card"><h2>相關新聞</h2><ul id="stockNews" class="newslist"></ul></div>
+    </div>
+  </section>
+</main>
+<div id="toast" class="hidden"></div>
+<div id="modal" class="modal hidden"><div class="modal-box"><button class="modal-close" id="modalClose">✕</button><div id="modalBody"></div></div></div>
+<script>window.STATIC_MODE=true;</script>
+<script src="app.js"></script>
+<script src="daytrade.js"></script>
+</body>
+</html>
